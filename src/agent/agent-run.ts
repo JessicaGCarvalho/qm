@@ -1300,8 +1300,10 @@ export function createAgent(opts?: AgentOptions): Agent {
                                   cancel: toolAbort.signal,
                                 }),
                               );
-                        if (entry.agentSession.isStreaming) await entry.agentSession.steer(note);
-                        else
+                        if (entry.agentSession.isStreaming) {
+                          await entry.agentSession.steer(note);
+                          steerWake.abort();
+                        } else
                           await entry.ref.emit?.({
                             type: "user",
                             payload: { hidden: true, text: note },
