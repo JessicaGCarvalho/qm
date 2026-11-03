@@ -46,7 +46,14 @@ export function createPostgresInstanceRegistry(
          ON CONFLICT (instance_id) DO UPDATE SET beat_at = now()`,
         [opts.instanceId, opts.deploymentKey, String(opts.startedAt)],
       );
-      await pg.query(`DELETE FROM instance_heartbeats WHERE beat_at < now() - interval '1 hour'`, []);
+      await pg.query(
+        `DELETE FROM instance_heartbeats stale
+          WHERE NOT EXISTS (
+            SELECT 1 FROM instance_heartbeats recent
+             WHERE recent.build_sha = stale.build_sha AND recent.beat_at > now() - interval '1 hour'
+          )`,
+        [],
+      );
       const { rowCount } = await pg.query(
         `WITH deployments AS (
            SELECT build_sha, min(started_at) AS started_at, max(beat_at) AS beat_at

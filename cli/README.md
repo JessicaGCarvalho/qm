@@ -129,8 +129,8 @@ that identity; an explicit core restart allocates a new one.
 
 Every core process with background work enabled heartbeats under its deployment
 identity (its build hash when it has none). A deployment counts as started when its
-first process started, remembered for an hour after its last heartbeat, so a replaced
-task does not make its deployment newer. When a deployment with another identity started more
+first process started, remembered while any of its processes heartbeats and for an
+hour after, so a replaced task does not make its deployment newer. When a deployment with another identity started more
 recently and is still heartbeating, the older one stops claiming runs, stops its
 cron scheduler and closes its Slack connections within ten seconds, and finishes
 admitted work under its leases. It resumes within ten seconds after the newer

@@ -63,6 +63,14 @@ test(
     );
     assert.equal(await next.beat(), false, "the replacement does not take over from the newer deployment");
 
+    await pool.query(
+      "UPDATE instance_heartbeats SET beat_at = now() - interval '2 hours' WHERE instance_id IN ('i-old', 'i-peer')",
+    );
+    assert.equal(
+      await replaced.beat(),
+      true,
+      "the older deployment keeps its first start while any of its processes is alive, however long ago that start was",
+    );
     await next.retire();
     assert.equal(await old.beat(), false, "a newer build that stops cleanly hands back at once");
 
