@@ -837,7 +837,9 @@ export function createToolContext(deps: ToolContextDeps): ToolContext {
       const scratchOnly = scratchOnlyHandles(requested);
       const reachTarget = execOpts?.reachTarget;
       if ([scratch, reachTarget !== undefined, execOpts?.sandboxId !== undefined].filter(Boolean).length > 1) {
-        throw new Error("a command runs on one computer — choose scoped, scratch, or a reached room");
+        throw new Error(
+          'a command runs on one computer — pass only one of `sandbox_id`, `scope: "scratch"`, or a reached room',
+        );
       }
       if ((scratch || scratchOnly) && !deps.provisionScratch) {
         throw new Error('scratch execution is not available on this computer — run without scope:"scratch"');
