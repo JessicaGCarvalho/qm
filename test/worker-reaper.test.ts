@@ -10,6 +10,8 @@ import { createReaper } from "../src/runs/reaper.ts";
 import { createWorker, SHUTDOWN_EXIT_MS, SHUTDOWN_RELEASE_MS, SHUTDOWN_SETTLE_MS } from "../src/runs/worker.ts";
 import type { Orchestrator } from "../src/core/orchestrator.ts";
 import { buildApp } from "./support/build-app.ts";
+import { createMockAgent } from "./support/mock-agent.ts";
+import type { BuiltApp } from "../src/wiring.ts";
 import type { LeaderLease } from "../src/persistence/leader-lease.ts";
 import type { OrchestratorInput } from "../src/core/orchestrator.ts";
 import type { Principal } from "../src/types.ts";
@@ -417,8 +419,8 @@ test("shutdown aborts the blocked step before the handback, and the next worker 
 
 test("shutdown mid-turn through the agent leaves no stop marker, and the resumed attempt finishes the work", async () => {
   const config = testConfig({ dataDir: mkdtempSync(join(tmpdir(), "agent-resume-")), workers: 1, shutdownDrainMs: 30 });
-  const built = buildApp(config);
-  const resumed = buildApp(config);
+  const agent = createMockAgent();
+  const built = buildApp(config, { agent });
   const threadRef = "agent-shutdown-resume";
   const queued = await built.app.turn({
     surface: "test",
@@ -427,23 +429,24 @@ test("shutdown mid-turn through the agent leaves no stop marker, and the resumed
     text: "!work-until-shutdown",
     async: true,
   });
-  const entriesNow = async () => {
-    const session = await resumed.sessions.getByThread(threadRef);
-    return session ? resumed.sessions.getItems(session.id) : [];
+  const entriesNow = async (app: BuiltApp) => {
+    const session = await app.sessions.getByThread(threadRef);
+    return session ? app.sessions.getItems(session.id) : [];
   };
   built.runtime.start();
+  const deadline = Date.now() + 5_000;
+  while (!(await entriesNow(built)).some((entry) => entry.kind === "ToolResult")) {
+    if (Date.now() > deadline) throw new Error("the first attempt never recorded its tool work");
+    await sleep(10);
+  }
+  await built.runtime.stop();
+  const resumed = buildApp(config, { agent });
   try {
-    const deadline = Date.now() + 5_000;
-    while (!(await entriesNow()).some((entry) => entry.kind === "ToolResult")) {
-      if (Date.now() > deadline) throw new Error("the first attempt never recorded its tool work");
-      await sleep(10);
-    }
-    await built.runtime.stop();
     const handedBack = (await resumed.runs.get(queued.runId!))!;
     assert.equal(handedBack.status, "pending");
     assert.equal(handedBack.attempts, 1);
     assert.equal(handedBack.leaseToken, null);
-    const interrupted = await entriesNow();
+    const interrupted = await entriesNow(resumed);
     assert.deepEqual(
       interrupted.filter((entry) => entry.kind === "AgentMessage"),
       [],
@@ -454,7 +457,7 @@ test("shutdown mid-turn through the agent leaves no stop marker, and the resumed
     assert.equal(done.status, "done");
     assert.equal(done.attempts, 2);
     assert.equal(done.result?.reply, "finished after resume");
-    const replies = (await entriesNow()).filter((entry) => entry.kind === "AgentMessage");
+    const replies = (await entriesNow(resumed)).filter((entry) => entry.kind === "AgentMessage");
     assert.deepEqual(
       replies.map((entry) => entry.text),
       ["finished after resume"],

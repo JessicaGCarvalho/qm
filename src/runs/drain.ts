@@ -1,5 +1,6 @@
 import type { InstanceRegistry } from "./instance-registry.ts";
 import { createSweeper, type Sweeper } from "../util/sweeper.ts";
+import { reportFailureAs } from "../util/errors.ts";
 
 export interface BackgroundServices {
   resume(): void;
@@ -57,7 +58,7 @@ export function createDrainController(opts: { registry: InstanceRegistry; sweepM
     async stop() {
       services = undefined;
       await sweeper.stop();
-      await opts.registry.retire();
+      await opts.registry.retire().catch(reportFailureAs("deploy-drain: retire heartbeat", undefined));
     },
     canClaim: () => !superseded,
   };

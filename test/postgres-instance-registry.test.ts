@@ -25,7 +25,7 @@ test(
       instanceId: "i-old",
       deploymentKey: "sha-a",
       startedAt: 1000,
-      livenessMs: 200,
+      livenessMs: 1_000,
     });
     assert.equal(await old.beat(), false, "alone: not superseded");
 
@@ -33,7 +33,7 @@ test(
       instanceId: "i-peer",
       deploymentKey: "sha-a",
       startedAt: 2000,
-      livenessMs: 200,
+      livenessMs: 1_000,
     });
     await peer.beat();
     assert.equal(await old.beat(), false, "same-sha peer (scale-out) never drains");
@@ -42,7 +42,7 @@ test(
       instanceId: "i-new",
       deploymentKey: "sha-b",
       startedAt: 3000,
-      livenessMs: 200,
+      livenessMs: 1_000,
     });
     await next.beat();
     assert.equal(await old.beat(), true, "newer build live: superseded");
@@ -52,7 +52,7 @@ test(
       instanceId: "i-old-replacement",
       deploymentKey: "sha-a",
       startedAt: 4000,
-      livenessMs: 200,
+      livenessMs: 1_000,
     });
     assert.equal(await replaced.beat(), true, "a replaced task of the older deployment stays behind the newer one");
     assert.equal(await next.beat(), false, "the replacement does not take over from the newer deployment");
@@ -64,11 +64,11 @@ test(
       instanceId: "i-crashed",
       deploymentKey: "sha-c",
       startedAt: 5000,
-      livenessMs: 200,
+      livenessMs: 1_000,
     });
     await crashed.beat();
     assert.equal(await old.beat(), true, "a newer build drains the old one again");
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 1_100));
     assert.equal(await old.beat(), false, "the newer build's beats went stale (failed deploy): claiming resumes");
   },
 );
