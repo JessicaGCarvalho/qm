@@ -55,7 +55,6 @@ const ORG_LABEL_KEY = "qm.org";
 const orgLabelArgs = (ctx: DockerCtx): string[] => ["--label", `${ORG_LABEL_KEY}=${ctx.config.orgId}`];
 const baseHostPort = (ctx: DockerCtx): number => dockerBasePort(ctx.config);
 const publicHostPort = (ctx: DockerCtx): number => baseHostPort(ctx) + 2;
-const FRONT_DOOR_READY = /public front door on/;
 const publicBindAddress = (config: QmConfig): string =>
   ["localhost", "127.0.0.1", "[::1]"].includes(new URL(config.publicUrl).hostname) ? "127.0.0.1:" : "";
 
@@ -523,16 +522,26 @@ function noteLogTail(name: string, logs: string): void {
   note(tailString(logs, 25));
 }
 
+async function frontDoorAnswers(ctx: DockerCtx): Promise<boolean> {
+  return fetch(`http://127.0.0.1:${publicHostPort(ctx)}/healthz`).then(
+    (res) => res.ok,
+    () => false,
+  );
+}
+
 async function waitReady(ctx: DockerCtx, service: ServiceName): Promise<void> {
-  const readiness = service === "core" ? FRONT_DOOR_READY : serviceDef(service).readiness;
   const name = cname(ctx, service);
   for (let i = 0; i < 90; i++) {
-    const logs = captureBoth("docker", ["logs", name]);
-    if (readiness.test(logs)) {
+    const ready =
+      service === "core"
+        ? await frontDoorAnswers(ctx)
+        : serviceDef(service).readiness.test(captureBoth("docker", ["logs", name]));
+    if (ready) {
       persistRestart(name);
       return;
     }
     if (!containerRunning(name)) {
+      const logs = captureBoth("docker", ["logs", name]);
       noteLogTail(name, logs);
       throw new CliError(`${service} exited before becoming ready (see logs above)`);
     }

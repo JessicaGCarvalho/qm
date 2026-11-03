@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Config } from "../config.ts";
 import { s3Client } from "../persistence/s3.ts";
-import { reportFailureAs } from "../util/errors.ts";
+import { jitteredBackoffMs } from "../util/async.ts";
+import { reportFailure } from "../util/errors.ts";
+import { readWebBundleLayout } from "../../cli/src/web-release.ts";
 import {
   createLocalWebReleaseStore,
   createS3WebReleaseStore,
@@ -46,14 +48,15 @@ export async function startFrontDoor(
   env: NodeJS.ProcessEnv,
 ): Promise<{ close(): void; terminate(): void }> {
   const store = webReleaseStore(config);
+  const bundle = existsSync(join(BUNDLED_WEB_UI, "index.html")) ? readWebBundleLayout(BUNDLED_WEB_UI) : undefined;
+  if (!bundle) console.log(`[web] this build carries no web UI bundle at ${BUNDLED_WEB_UI}; serving the live release`);
   let bundled: string | undefined;
   let publishing: Promise<void> | undefined;
-  const hasBundle = existsSync(join(BUNDLED_WEB_UI, "index.html"));
-  if (!hasBundle)
-    console.log(`[web] this build carries no web UI bundle at ${BUNDLED_WEB_UI}; serving the live release`);
+  let failures = 0;
+  let retryAt = 0;
   const publishBundled = (): string | undefined => {
-    if (!hasBundle) return undefined;
-    publishing ??= deployBundledRelease(store, BUNDLED_WEB_UI)
+    if (!bundle || Date.now() < retryAt) return undefined;
+    publishing ??= deployBundledRelease(store, BUNDLED_WEB_UI, bundle)
       .then(
         (result) => {
           bundled = result.id;
@@ -61,7 +64,10 @@ export async function startFrontDoor(
             `[web] bundled web UI release ${result.id} ${result.uploaded ? "uploaded to" : "already in"} ${store.describe()}; live release ${result.live}`,
           );
         },
-        reportFailureAs("web.bundled_release_publish", undefined),
+        (error: unknown) => {
+          retryAt = Date.now() + jitteredBackoffMs(++failures);
+          reportFailure("web.bundled_release_publish", error);
+        },
       )
       .finally(() => {
         publishing = undefined;

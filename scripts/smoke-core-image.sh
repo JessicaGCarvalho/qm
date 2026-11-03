@@ -35,7 +35,6 @@ docker run -d --name "$container" --network "$network" -p 127.0.0.1::8000 \
   -e SANDBOX_BACKEND=local \
   -e PUBLIC_PORT=8000 \
   -e PUBLIC_WEB_URL=https://portal.example.com \
-  -e PORTAL_PUBLIC_URL=https://portal.example.com \
   -e CONNECTOR_SECRET_KEY="$(secret)" \
   -e CORE_SIGNING_SECRET="$(secret)" \
   -e CAPABILITY_SECRET="$(secret)" \
@@ -70,14 +69,13 @@ port="$(docker port "$container" 8000/tcp | sed 's/.*://')"
 
 for _ in {1..90}; do
   [[ "$(docker inspect -f '{{.State.Running}}' "$container")" == true ]] || { echo "core exited" >&2; exit 1; }
-  if curl -fs "http://127.0.0.1:$port/healthz" >/dev/null && docker logs "$container" 2>&1 | grep -q "bundled web UI release"; then
-    docker logs "$container" 2>&1 | grep -q "bundled web UI release [0-9a-f]\{64\} uploaded to /data/web-ui/" \
-      || { echo "core did not publish its bundled web UI release" >&2; exit 1; }
+  if curl -fs "http://127.0.0.1:$port/healthz" >/dev/null && docker exec "$container" test -s /data/web-ui/live.json; then
     release="$(docker exec "$container" node -p "JSON.parse(require('node:fs').readFileSync('/data/web-ui/live.json','utf8')).release")"
-    docker exec "$container" test -s "/data/web-ui/releases/$release/index.html"
-    docker exec "$container" node -e "fetch('http://127.0.0.1:8099/.well-known/jwks.json').then(async r=>{const j=await r.json();process.exit(r.ok&&j.keys?.length===1?0:1)}).catch(()=>process.exit(1))"
+    docker exec "$container" test -s "/data/web-ui/releases/$release/index.html" \
+      || { echo "live.json names release $release, but its index.html is not in /data/web-ui" >&2; exit 1; }
+    docker exec "$container" node -e "fetch('http://127.0.0.1:8099/.well-known/jwks.json').then(async r=>{const j=await r.json();if(r.ok&&j.keys?.length===1)return;console.error('broker JWKS answered HTTP '+r.status+' with '+(j.keys?.length??0)+' keys');process.exit(1)}).catch(e=>{console.error('broker JWKS unreachable: '+e.message);process.exit(1)})"
     status="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/idp/.well-known/jwks.json")"
-    [[ "$status" != 200 ]]
+    [[ "$status" != 200 ]] || { echo "the broker JWKS is reachable through the front door (HTTP $status)" >&2; exit 1; }
     status="$(curl -s -o /dev/null -w '%{http_code}' -H 'accept: text/html' "http://127.0.0.1:$port/")"
     [[ "$status" == 302 ]] || { echo "the front door answered / with HTTP $status instead of a sign-in redirect" >&2; exit 1; }
     echo "ok: core image serves the front door, embedded sign-in broker, and its web UI release $release"

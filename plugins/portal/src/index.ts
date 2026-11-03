@@ -78,6 +78,7 @@ import {
   PORTAL_IDENTITY_SECRET,
   isMissingOrPlaceholder,
 } from "../../chassis/src/env.ts";
+import { isDeploymentGitRoute } from "../../chassis/src/deployment-git.ts";
 
 const PUBLIC_URL = (process.env.PORTAL_PUBLIC_URL ?? "http://localhost:8097").replace(/\/$/, "");
 const SESSION_SECRET = process.env.PORTAL_SESSION_SECRET;
@@ -776,11 +777,6 @@ function hasAgentCapability(req: IncomingMessage): boolean {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function isDeploymentGitPassthrough(method: string, pathname: string): boolean {
-  const route = /^\/v1\/deployments\/[^/]+\/git\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(pathname)?.[1];
-  return route === "info/refs" ? method === "GET" : route !== undefined && method === "POST";
-}
-
 function isDeploymentLayerPassthrough(method: string, pathname: string): boolean {
   return (method === "GET" || method === "PUT") && pathname === "/v1/deployment-layer";
 }
@@ -1234,7 +1230,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     ]);
   }
 
-  if (isDeploymentGitPassthrough(method, pathname)) {
+  if (isDeploymentGitRoute(method, pathname)) {
     return proxyToUpstream(
       req,
       res,

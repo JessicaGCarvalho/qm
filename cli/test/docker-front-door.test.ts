@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -88,7 +89,10 @@ async function up(logs: string, publicUrl = "http://localhost:8082"): Promise<{ 
   }
 }
 
-test("docker up publishes core's front door on loopback and wires its sign-in", { timeout: 60_000 }, async () => {
+test("docker up publishes core's front door on loopback and wires its sign-in", { timeout: 60_000 }, async (t) => {
+  const frontDoor = createServer((req, res) => res.writeHead(req.url === "/healthz" ? 200 : 404).end());
+  await new Promise<void>((resolve) => frontDoor.listen(8082, "127.0.0.1", resolve));
+  t.after(() => frontDoor.close());
   const { calls, error } = await up("[qm] listening on :8080\n[portal] public front door on http://localhost:8000");
   assert.equal(error, undefined);
   const run = calls.find((args) => args[0] === "run" && args.includes("qm-acme-core"))!;
@@ -104,7 +108,7 @@ test("docker up publishes core's front door on loopback and wires its sign-in", 
     assert.ok(run.includes(env), env);
 });
 
-test("docker up does not report core ready until its front door listens", { timeout: 60_000 }, async () => {
+test("docker up does not report core ready until its front door answers", { timeout: 60_000 }, async () => {
   const { error } = await up("[qm] listening on :8080");
   assert.match(String(error), /core exited before becoming ready/);
 });

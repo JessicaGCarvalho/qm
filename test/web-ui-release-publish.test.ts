@@ -129,7 +129,6 @@ test("a running core serves each published web UI release without restarting", a
   });
   core.stdout!.on("data", (chunk: Buffer) => (log += chunk.toString()));
   core.stderr!.on("data", (chunk: Buffer) => (log += chunk.toString()));
-  const pid = core.pid;
   await waitFor("the front door", () => log.includes("public front door on"), 90_000);
   await waitFor("the bundled release step", () => /bundled web UI release/.test(log), 60_000);
 
@@ -156,5 +155,4 @@ test("a running core serves each published web UI release without restarting", a
   await waitFor("the rollback to release A", async () => (await page()).includes("release-alpha"), 10_000);
 
   assert.equal(core.exitCode, null);
-  assert.equal(core.pid, pid);
 });

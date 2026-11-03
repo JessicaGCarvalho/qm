@@ -6,6 +6,8 @@ import { awsObjectStoreBucket } from "../terraform.ts";
 import {
   LIVE_KEY,
   RELEASE_ID,
+  formatLivePointer,
+  releaseMarkerKey,
   WEB_RELEASE_ROOT,
   parseLivePointer,
   readWebBundleLayout,
@@ -66,7 +68,6 @@ function aws(store: ReleaseStore, args: string[], input?: string): { status: num
   ];
   const r = spawnSync(process.env.AWS_BIN ?? "aws", [...args, ...location], {
     encoding: "utf8",
-    maxBuffer: 16 * 1024 * 1024,
     ...(input === undefined ? { stdio: ["ignore", "pipe", "pipe"] } : { input }),
   });
   if (r.error) throw new CliError(`could not run the AWS CLI: ${r.error.message}`, { cause: r.error });
@@ -143,7 +144,7 @@ export function runUiPublish(config: QmConfig, o: UiPublishOptions): void {
   let id: string;
   if (o.release) {
     id = o.release;
-    if (!objectExists(store, releaseKey(id, "index.html")))
+    if (!objectExists(store, releaseMarkerKey(id)))
       throw new CliError(`web UI release ${id} is not in ${s3Uri(store, "releases/")}`);
   } else {
     let bundle: WebBundleLayout;
@@ -153,7 +154,7 @@ export function runUiPublish(config: QmConfig, o: UiPublishOptions): void {
       throw new CliError(`cannot read the web UI bundle at ${o.dir}: ${(error as Error).message}`, { cause: error });
     }
     id = bundle.id;
-    if (objectExists(store, releaseKey(id, "index.html"))) step(`web UI release ${id} is already uploaded`);
+    if (objectExists(store, releaseMarkerKey(id))) step(`web UI release ${id} is already uploaded`);
     else upload(store, o.dir!, bundle);
   }
   const pointer: LivePointer = { release: id, deployed: readPointer(store)?.deployed ?? "" };
@@ -161,7 +162,7 @@ export function runUiPublish(config: QmConfig, o: UiPublishOptions): void {
     store,
     "switching the live web UI release",
     ["s3", "cp", "-", s3Uri(store, LIVE_KEY)],
-    `${JSON.stringify(pointer)}\n`,
+    formatLivePointer(pointer),
   );
   ok(
     `web UI release ${id} is live (${((Date.now() - started) / 1000).toFixed(1)}s); running cores pick it up within seconds`,

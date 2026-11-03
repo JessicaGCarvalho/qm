@@ -18,6 +18,8 @@ export const LIVE_KEY = "live.json";
 export const RELEASE_ID = /^[0-9a-f]{64}$/;
 
 export const releaseKey = (id: string, name: string): string => `releases/${id}/${name}`;
+export const releaseMarkerKey = (id: string): string => releaseKey(id, "index.html");
+export const formatLivePointer = (pointer: LivePointer): string => `${JSON.stringify(pointer)}\n`;
 
 export function parseLivePointer(text: string, where: string): LivePointer {
   let parsed: unknown;
@@ -28,7 +30,8 @@ export function parseLivePointer(text: string, where: string): LivePointer {
   }
   const { release, deployed } = (parsed ?? {}) as Partial<Record<keyof LivePointer, unknown>>;
   if (typeof release !== "string" || !RELEASE_ID.test(release)) throw new Error(`${where} names no release: ${text}`);
-  return { release, deployed: typeof deployed === "string" ? deployed : "" };
+  if (typeof deployed !== "string") throw new Error(`${where} names no deployed release: ${text}`);
+  return { release, deployed };
 }
 
 function bundleFiles(dir: string, rel = ""): string[] {

@@ -60,13 +60,13 @@ test("the reader switches releases within one pointer refresh and keeps old asse
   await deployBundledRelease(store, two);
   await store.put("live.json", Buffer.from(JSON.stringify({ release: readWebBundleLayout(one).id, deployed: "" })));
 
-  let now = 0;
+  let now = 1_000;
   const reader = createWebReleaseReader(store, { pointerTtlMs: 2_000, now: () => now });
   assert.equal(await reader.document("index.html"), "<title>first</title>");
   await store.put("live.json", Buffer.from(JSON.stringify({ release: idTwo, deployed: "" })));
-  now = 1_999;
+  now = 3_000;
   assert.equal(await reader.document("index.html"), "<title>first</title>");
-  now = 2_000;
+  now = 3_001;
   assert.equal(await reader.document("index.html"), "<title>second</title>");
 
   const brand = await reader.file("brand-mark.svg", false);
@@ -89,7 +89,7 @@ test("a failed pointer refresh keeps serving the last release and reports why", 
     open: (key) => (broken && key === "live.json" ? Promise.reject(new Error("AccessDenied (403)")) : real.open(key)),
   };
   const lines: string[] = [];
-  let now = 0;
+  let now = 1_000;
   const reader = createWebReleaseReader(store, { now: () => now, log: (line) => lines.push(line) });
   assert.equal(await reader.document("index.html"), "<title>first</title>");
   broken = true;

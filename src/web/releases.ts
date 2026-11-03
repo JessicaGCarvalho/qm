@@ -6,14 +6,18 @@ import { Readable } from "node:stream";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import type { WebReleases } from "../../plugins/web-ui/server/index.ts";
 import { bodyToReadable, isNoSuchKey, s3Client, type S3Send } from "../persistence/s3.ts";
-import { errMessage } from "../util/errors.ts";
+import { LRUCache } from "lru-cache";
+import { errMessage, reportFailure } from "../util/errors.ts";
 import {
   LIVE_KEY,
   WEB_RELEASE_ROOT,
   parseLivePointer,
+  formatLivePointer,
   readWebBundleLayout,
   releaseKey,
+  releaseMarkerKey,
   type LivePointer,
+  type WebBundleLayout,
 } from "../../cli/src/web-release.ts";
 
 export interface WebReleaseStore {
@@ -87,7 +91,10 @@ export function createLocalWebReleaseStore(dir: string): WebReleaseStore & { has
     async has(key) {
       return access(pathOf(key)).then(
         () => true,
-        () => false,
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return false;
+          throw new Error(`checking ${pathOf(key)} failed: ${errMessage(error)}`, { cause: error });
+        },
       );
     },
     describe: () => `${dir}${sep}`,
@@ -140,7 +147,7 @@ export async function readLivePointer(store: WebReleaseStore): Promise<LivePoint
 }
 
 async function writeLivePointer(store: WebReleaseStore, pointer: LivePointer): Promise<void> {
-  await store.put(LIVE_KEY, Buffer.from(`${JSON.stringify(pointer)}\n`));
+  await store.put(LIVE_KEY, Buffer.from(formatLivePointer(pointer)));
 }
 
 async function uploadAll(store: WebReleaseStore, dir: string, keyed: Array<[string, string]>): Promise<void> {
@@ -155,9 +162,9 @@ async function uploadAll(store: WebReleaseStore, dir: string, keyed: Array<[stri
 export async function deployBundledRelease(
   store: WebReleaseStore,
   dir: string,
+  bundle: WebBundleLayout = readWebBundleLayout(dir),
 ): Promise<{ id: string; uploaded: boolean; live: string }> {
-  const bundle = readWebBundleLayout(dir);
-  const marker = await store.open(releaseKey(bundle.id, "index.html"));
+  const marker = await store.open(releaseMarkerKey(bundle.id));
   marker?.destroy();
   if (!marker) {
     await uploadAll(
@@ -187,67 +194,68 @@ export function createWebReleaseReader(
     log?: (line: string) => void;
   } = {},
 ): WebReleases & { live(): Promise<string> } {
-  const ttl = opts.pointerTtlMs ?? 2_000;
-  const now = opts.now ?? Date.now;
   const log = opts.log ?? ((line: string) => console.error(line));
-  let current: { release: string; readAt: number } | undefined;
-  let inflight: Promise<string> | undefined;
-  let files = new Map<string, Promise<Buffer | null>>();
-  let filesFor = "";
-
-  async function refresh(): Promise<string> {
-    try {
-      const pointer = await readLivePointer(store);
-      if (!pointer) throw new Error(`no web UI release is live in ${store.describe()} yet`);
-      const bundled = opts.bundled?.();
-      const release = bundled && pointer.deployed !== bundled ? bundled : pointer.release;
-      current = { release, readAt: now() };
-    } catch (error) {
-      if (!current) throw error;
-      log(`[web] live release pointer unreadable, still serving ${current.release}: ${errMessage(error)}`);
-      current = { release: current.release, readAt: now() };
-    }
-    return current.release;
-  }
+  let reported = "";
+  let failure: unknown;
+  const pointer: LRUCache<"live", string> = new LRUCache<"live", string>({
+    max: 1,
+    ttl: opts.pointerTtlMs ?? 2_000,
+    ttlResolution: 0,
+    allowStaleOnFetchRejection: true,
+    ...(opts.now ? { perf: { now: opts.now } } : {}),
+    fetchMethod: async () => {
+      try {
+        const live = await readLivePointer(store);
+        if (!live) throw new Error(`no web UI release is live in ${store.describe()} yet`);
+        const bundled = opts.bundled?.();
+        reported = "";
+        return bundled && live.deployed !== bundled ? bundled : live.release;
+      } catch (error) {
+        failure = error;
+        const stale = pointer.peek("live", { allowStale: true });
+        if (stale === undefined) throw error;
+        log(`[web] live release pointer unreadable, still serving ${stale}: ${errMessage(error)}`);
+        if (errMessage(error) !== reported) {
+          reported = errMessage(error);
+          reportFailure("web.live_pointer_unreadable", error);
+        }
+        throw error;
+      }
+    },
+  });
+  const files = new LRUCache<string, { body: Buffer | null }, string>({
+    max: 512,
+    fetchMethod: async (_key, _stale, { context }) => {
+      const stream = await store.open(context);
+      return { body: stream ? await readAll(stream) : null };
+    },
+  });
 
   async function live(): Promise<string> {
-    if (current && now() - current.readAt < ttl) return current.release;
-    inflight ??= refresh().finally(() => {
-      inflight = undefined;
-    });
-    return inflight;
+    const release = await pointer.fetch("live");
+    if (release === undefined) throw failure;
+    return release;
   }
 
-  async function releaseFile(name: string): Promise<Buffer | null> {
+  async function releaseFile(name: string): Promise<{ release: string; body: Buffer | null }> {
     const release = await live();
-    if (filesFor !== release) {
-      files = new Map();
-      filesFor = release;
-    }
-    const known = files.get(name);
-    if (known) return known;
-    const loading = store.open(releaseKey(release, name)).then((stream) => (stream ? readAll(stream) : null));
-    files.set(name, loading);
-    loading.then(
-      (body) => body ?? files.delete(name),
-      () => files.delete(name),
-    );
-    return loading;
+    const key = releaseKey(release, name);
+    return { release, body: (await files.fetch(key, { context: key }))?.body ?? null };
   }
 
   return {
     live,
     async document(name) {
-      const body = await releaseFile(name);
-      if (!body) throw new Error(`web UI release ${current?.release} has no ${name} in ${store.describe()}`);
+      const { release, body } = await releaseFile(name);
+      if (!body) throw new Error(`web UI release ${release} has no ${name} in ${store.describe()}`);
       return body.toString("utf8");
     },
     async file(path, gzip) {
       if (!path.startsWith("assets/")) {
-        const packed = gzip ? await releaseFile(`${path}.gz`) : null;
-        if (packed) return { body: Readable.from(packed), gzip: true };
-        const plain = await releaseFile(path);
-        return plain ? { body: Readable.from(plain), gzip: false } : null;
+        const plain = (await releaseFile(path)).body;
+        if (!plain) return null;
+        const packed = gzip ? (await releaseFile(`${path}.gz`)).body : null;
+        return packed ? { body: Readable.from(packed), gzip: true } : { body: Readable.from(plain), gzip: false };
       }
       if (gzip) {
         const packed = await store.open(`${path}.gz`);
