@@ -132,7 +132,11 @@ test("a running core serves each published web UI release without restarting", a
   core.stdout!.on("data", (chunk: Buffer) => (log += chunk.toString()));
   core.stderr!.on("data", (chunk: Buffer) => (log += chunk.toString()));
   await waitFor("the front door", () => log.includes("public front door on"), 90_000);
-  await waitFor("the bundled release step", () => /bundled web UI release/.test(log), 60_000);
+  await waitFor(
+    "the bundled release step",
+    () => log.includes("bundled web UI release") || log.includes("carries no web UI bundle"),
+    60_000,
+  );
 
   const page = async (): Promise<string> => {
     const response = await fetch(`http://127.0.0.1:${publicPort}/`).catch(() => undefined);

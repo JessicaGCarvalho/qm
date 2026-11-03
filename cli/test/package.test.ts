@@ -244,7 +244,7 @@ test(
         ),
       );
       const cluster = "acme-aws-qm";
-      const portalTarget = `arn:aws:elasticloadbalancing:us-west-2:000000000000:targetgroup/${cluster}-port-${createHash("sha1").update(`${cluster}:portal`).digest("hex").slice(0, 6)}/1`;
+      const frontDoorTarget = `arn:aws:elasticloadbalancing:us-west-2:000000000000:targetgroup/${cluster}-core-${createHash("sha1").update(`${cluster}:core-public`).digest("hex").slice(0, 6)}/1`;
       const fakeAws = join(dir, "aws");
       writeFileSync(
         fakeAws,
@@ -255,8 +255,8 @@ const option = (name) => args[args.indexOf(name) + 1];
 const json = (value) => process.stdout.write(JSON.stringify(value));
 if (command === "sts get-caller-identity") process.stdout.write("000000000000\\n");
 else if (command === "elbv2 describe-load-balancers") json({ LoadBalancers: [{ LoadBalancerArn: "arn:alb", DNSName: "replace-with-alb-hostname", State: { Code: "active" } }] });
-else if (command === "elbv2 describe-listeners") json({ Listeners: [{ ListenerArn: "arn:listener", Protocol: "HTTP", Port: 80, DefaultActions: [{ Type: "forward", TargetGroupArn: ${JSON.stringify(portalTarget)} }] }] });
-else if (command === "elbv2 describe-target-groups") json({ TargetGroups: [{ TargetGroupArn: ${JSON.stringify(portalTarget)}, TargetGroupName: ${JSON.stringify(portalTarget.split("/")[1])} }] });
+else if (command === "elbv2 describe-listeners") json({ Listeners: [{ ListenerArn: "arn:listener", Protocol: "HTTP", Port: 80, DefaultActions: [{ Type: "forward", TargetGroupArn: ${JSON.stringify(frontDoorTarget)} }] }] });
+else if (command === "elbv2 describe-target-groups") json({ TargetGroups: [{ TargetGroupArn: ${JSON.stringify(frontDoorTarget)}, TargetGroupName: ${JSON.stringify(frontDoorTarget.split("/")[1])} }] });
 else if (command === "elbv2 describe-rules") json({ Rules: [] });
 else if (command === "ecs describe-services") {
   const start = args.indexOf("--services") + 1;
@@ -266,7 +266,7 @@ else if (command === "ecs describe-services") {
     status: "ACTIVE",
     desiredCount: 0,
     taskDefinition: "arn:task/" + serviceName + ":1",
-    loadBalancers: serviceName.endsWith("-portal") ? [{ targetGroupArn: ${JSON.stringify(portalTarget)} }] : [],
+    loadBalancers: serviceName.endsWith("-core") ? [{ targetGroupArn: ${JSON.stringify(frontDoorTarget)} }] : [],
     tags: [{ key: "Deployment", value: "acme-aws" }, { key: "ManagedBy", value: "terraform" }],
   })) });
 } else if (command === "ecs describe-task-definition") json({ taskDefinition: { family: "legacy", containerDefinitions: [] } });

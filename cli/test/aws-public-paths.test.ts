@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -44,7 +43,7 @@ function fixture(paths: unknown = ["/hooks/*"], blueGreen = false, priority = "2
       },
     }),
   );
-  const frontDoor = `acme-core-${createHash("sha1").update("acme:core-public").digest("hex").slice(0, 6)}`;
+  const frontDoor = "core";
   const names = ["core-public", "hooks"];
   const groupName = (name: string): string => (name === "core-public" ? frontDoor : name);
   const groups = names.flatMap((name) => [
