@@ -1,3 +1,4 @@
+import { executesOnApprove } from "../core/orchestrator/approvals.ts";
 import { isSubagentThreadRef } from "../sessions/session-syscalls.ts";
 import type {
   PendingApproval,
@@ -175,7 +176,7 @@ export function createAppHelpers(deps: AppDeps, app: App) {
       ...(r.grantModes ? { grantModes: r.grantModes } : {}),
       blocksInput: r.blocksInput !== false,
       ...(r.kind === "approval" ? { kind: r.kind } : {}),
-      ...(r.call ? { executesOnApprove: true } : {}),
+      ...executesOnApprove(r),
     }));
   }
 

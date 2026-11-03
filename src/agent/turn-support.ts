@@ -190,10 +190,6 @@ function toolCallRoute(
   return connector ? { tool: connector, args: { tool: call.tool, args: call.input } } : null;
 }
 
-// Runs one recorded tool call outside the model loop and records exactly one result for it.
-// `fresh` marks a call the transcript has not seen yet: its tool_call is recorded and both
-// entries carry `fresh` in their payload. Without it the call is a resumed one whose
-// tool_call is already in the transcript.
 async function runToolCallOnce(
   call: ResumableToolCall,
   ref: ToolContextRef,

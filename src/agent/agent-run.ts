@@ -1276,6 +1276,7 @@ export function createAgent(opts?: AgentOptions): Agent {
           else turn.cancel.addEventListener("abort", onCancel, { once: true });
         }
         const steeredSeen = recordedMessageTimestamps(turn.history);
+        const liveApprovals = new Set<Promise<void>>();
         const stopSignalPoll =
           signals && turn.runId
             ? startSignalPoll(
@@ -1288,17 +1289,26 @@ export function createAgent(opts?: AgentOptions): Agent {
                       if (!entry.agentSession.isStreaming || toolAbort.signal.aborted) return false;
                       const decided = await turn.resolveSteeredApproval(request);
                       if (decided.kind === "ignored") return;
-                      const note =
-                        decided.kind === "denied"
-                          ? deniedCallSteerNote(decided)
-                          : approvedCallSteerNote(
-                              decided,
-                              await runApprovedToolCall(decided.call, entry.ref, tools as unknown as BridgedTool[], {
-                                scopeLabel: turn.scopeLabel,
-                                cancel: toolAbort.signal,
-                              }),
-                            );
-                      await entry.agentSession.steer(note).catch(swallowAs("pi: steer approval outcome", undefined));
+                      const settled = (async () => {
+                        const note =
+                          decided.kind === "denied"
+                            ? deniedCallSteerNote(decided)
+                            : approvedCallSteerNote(
+                                decided,
+                                await runApprovedToolCall(decided.call, entry.ref, tools as unknown as BridgedTool[], {
+                                  scopeLabel: turn.scopeLabel,
+                                  cancel: toolAbort.signal,
+                                }),
+                              );
+                        if (entry.agentSession.isStreaming) await entry.agentSession.steer(note);
+                        else
+                          await entry.ref.emit?.({
+                            type: "user",
+                            payload: { hidden: true, text: note },
+                            scopeLabel: turn.scopeLabel,
+                          });
+                      })().catch(swallowAs("pi: live approval outcome", undefined));
+                      liveApprovals.add(settled);
                       return;
                     }
                     if (ts && steeredSeen.has(ts)) return;
@@ -1546,6 +1556,7 @@ export function createAgent(opts?: AgentOptions): Agent {
         } finally {
           turn.cancel?.removeEventListener("abort", onCancel);
           await stopSignalPoll?.();
+          await Promise.all(liveApprovals);
           if (pendingSteers.length) entry.agentSession.clearQueue();
           unsubscribeMessageEnd?.();
           unsubscribe?.();
