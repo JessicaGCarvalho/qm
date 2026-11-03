@@ -26,11 +26,6 @@ import { flushErrorReporting, tracePhase } from "../plugins/chassis/src/error-re
 import { createProductAnalytics } from "./util/product-analytics.ts";
 import { createAdmittedWork } from "./util/admitted-work.ts";
 import { runSessionSmoke } from "./deployment/postdeploy-smoke.ts";
-import {
-  createBackgroundOwnershipStore,
-  type BackgroundOwnershipControl,
-  type BackgroundOwnership,
-} from "./runs/background-ownership.ts";
 import { loadConnectorSdk } from "./sandbox/connector-sdk.ts";
 import { createFlyTunnelManager, parseFlyWireguardPeers } from "./deploy/fly-tunnel-manager.ts";
 import type { FlyPeerClaim } from "./deploy/fly-peer-claims.ts";
@@ -320,7 +315,7 @@ import {
   createPostgresInstanceRegistry,
   type InstanceRegistry,
 } from "./runs/instance-registry.ts";
-import { createDrainController, type DrainController } from "./runs/drain.ts";
+import { createDrainController, type BackgroundServices, type DrainController } from "./runs/drain.ts";
 import { createReaper, REAPER_LEASE_KEY, type Reaper } from "./runs/reaper.ts";
 import { createSweeper as createUntrackedSweeper, type Sweeper } from "./util/sweeper.ts";
 import { createPostgresProcessRegistry, type ProcessRegistry } from "./processes/process-registry.ts";
@@ -388,12 +383,7 @@ import { createSlackInstallationStore, type SlackInstallationStore } from "./sur
 import { type probeModel, type ProviderKeys } from "./model/model-runtime.ts";
 
 export interface Runtime {
-  start(): void;
-  startBackground(): void;
-  stopBackgroundClaims(): Promise<void>;
-  setBackgroundAdmission(canClaim: () => boolean, active: () => boolean): void;
-  stopBackground(): Promise<void>;
-  backgroundDrained(): Promise<void>;
+  start(services?: BackgroundServices): void;
   stop(): Promise<void>;
   releaseInFlightRuns(): Promise<void>;
 }
@@ -436,7 +426,7 @@ export function stopWithBackstop(
 
 export interface BuiltApp {
   checkReadiness: (signal: AbortSignal) => Promise<void>;
-  backgroundOwnership?: BackgroundOwnershipControl;
+  drain: DrainController;
   suggestedActivities?: ReturnType<typeof createSuggestedActivityService>;
   app: App;
   deploymentLayer: DeploymentLayerRuntime;
@@ -538,11 +528,7 @@ export function buildApp(
     agent?: Agent;
   } = {},
 ): BuiltApp {
-  let backgroundAdmission = () => !config.backgroundDeploymentId;
-  let backgroundActive = () => false;
-  const admittedWork = createAdmittedWork({
-    canStart: () => !config.backgroundDeploymentId || backgroundAdmission(),
-  });
+  const admittedWork = createAdmittedWork();
   let turnWaitShutdown = new AbortController();
   const createSweeper: typeof createUntrackedSweeper = (work, interval, options) =>
     createUntrackedSweeper(() => admittedWork.run(work), interval, options);
@@ -2581,7 +2567,6 @@ export function buildApp(
     skipFire: async (cron) => (await memoryTidy.skipFire(cron)) ?? suggestedActivities.skipFire(cron),
     runtimeError: (scope, runtime) => availableRuntimeError({ deps: runtimeDeps }, scope, runtime, "cron"),
     deleteCron: (id) => app.deleteCron(id),
-    requireQueueStart: Boolean(config.backgroundDeploymentId),
     advisoryLock,
     crons,
     deliveries,
@@ -2657,24 +2642,17 @@ export function buildApp(
     currentScopeMembers,
     resolveRecipient,
   });
-  const backgroundOwnership: BackgroundOwnershipControl | undefined = config.backgroundDeploymentId
-    ? {
-        store: createBackgroundOwnershipStore(artifactMap<BackgroundOwnership>("background_ownership")),
-        instanceId: randomUUID(),
-        deploymentId: config.backgroundDeploymentId,
-        active: () => backgroundActive(),
-      }
-    : undefined;
+  const deploymentKey = config.backgroundDeploymentId ?? config.buildSha;
   const instanceRegistry: InstanceRegistry =
-    pgArtifactMap && !backgroundOwnership && config.buildSha && config.backgroundWorkEnabled
+    pgArtifactMap && deploymentKey && config.backgroundWorkEnabled
       ? createPostgresInstanceRegistry(pgArtifactMap.pool, {
           instanceId: randomUUID(),
-          buildSha: config.buildSha,
+          deploymentKey,
           startedAt: Date.now(),
         })
       : createNoopInstanceRegistry();
   const drain: DrainController = createDrainController({ registry: instanceRegistry });
-  const canClaimRuns = () => backgroundAdmission() && drain.canClaim();
+  const canClaimRuns = () => drain.canClaim();
   const worker = createWorker({
     admittedWork,
     runs,
@@ -2791,7 +2769,6 @@ export function buildApp(
     if (backgroundRunning) return;
     backgroundRunning = true;
     admittedWork.resume();
-    drain.start();
     const generation = ++backgroundGeneration;
     worker.start();
     preemptionSweeper.start();
@@ -2878,34 +2855,22 @@ export function buildApp(
     return releasing;
   }
   const runtime: Runtime = {
-    start() {
+    start(services = { resume() {}, standDown: async () => {} }) {
       if (turnWaitShutdown.signal.aborted) turnWaitShutdown = new AbortController();
       releasing = null;
       flyTunnel?.monitor();
-      drain.start();
       renderBasePreparing = new AbortController();
       void renderBase
         ?.prepare(renderBasePreparing.signal)
         .catch(reportFailureAs("render-base: prepare the golden snapshot", undefined));
-      if (config.backgroundWorkEnabled && !config.backgroundDeploymentId) startBackground();
-    },
-    startBackground,
-    setBackgroundAdmission(canClaim, active) {
-      backgroundAdmission = canClaim;
-      backgroundActive = active;
-    },
-    async stopBackgroundClaims() {
-      void stopBackground().catch(swallowAs("wiring: background drain failed", undefined));
-      await Promise.all([backgroundClaimsStopping, worker.stopClaims()]);
-    },
-    stopBackground,
-    async backgroundDrained() {
-      await backgroundStopping;
-      await Promise.all([admittedWork.drained(), worker.drained()]);
+      if (!config.backgroundWorkEnabled) return;
+      startBackground();
+      drain.start(services);
     },
     releaseInFlightRuns,
     async stop() {
       renderBasePreparing?.abort();
+      const draining = drain.stop();
       await stopBackground();
       await Promise.all([
         withTimeout(() => admittedWork.drained(), config.shutdownDrainMs, "admitted work drain").catch(
@@ -2914,7 +2879,7 @@ export function buildApp(
         worker.stop(config.shutdownDrainMs),
       ]).catch(swallowAs("wiring: worker drain failed", undefined));
       await releaseInFlightRuns();
-      await drain.stop();
+      await draining;
       stopStreamSync();
       await Promise.all(
         [
@@ -3017,10 +2982,10 @@ export function buildApp(
     ...(ambientJudgments ? { ambientJudgments } : {}),
     ...(ackEmojiPicks ? { ackEmojiPicks } : {}),
     channelPolicy,
-    ...(config.suggestedActivitiesEnabled && (config.backgroundWorkEnabled || config.backgroundDeploymentId)
+    ...(config.suggestedActivitiesEnabled && config.backgroundWorkEnabled
       ? { suggestedActivities }
       : {}),
-    ...(backgroundOwnership ? { backgroundOwnership } : {}),
+    drain,
     uiState,
     sessionShares: artifactMap<SessionShare>("session_shares"),
     sessionShareBytes:
@@ -3051,11 +3016,14 @@ export function serverDeps(
     resolveBrowserCompanyKeys: built.resolveBrowserCompanyKeys,
     production: config.production,
     checkReadiness: built.checkReadiness,
-    ...(built.backgroundOwnership
+    ...(config.backgroundDeploymentId && config.backgroundWorkEnabled
       ? {
-          backgroundOwnership: built.backgroundOwnership,
           deploymentControlSecret: config.deploymentControlSecret,
-          deploymentLiveSmoke: () => runSessionSmoke(config, `http://127.0.0.1:${config.port}`),
+          deploymentLiveSmoke: {
+            deploymentId: config.backgroundDeploymentId,
+            superseded: () => !built.drain.canClaim(),
+            run: () => runSessionSmoke(config, `http://127.0.0.1:${config.port}`),
+          },
         }
       : {}),
     allowUnauthenticatedCore: config.allowUnauthenticatedCore,

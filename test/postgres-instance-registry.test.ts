@@ -23,7 +23,7 @@ test(
     const pool = createPostgresMapFactory(URL!).pool;
     const old = createPostgresInstanceRegistry(pool, {
       instanceId: "i-old",
-      buildSha: "sha-a",
+      deploymentKey: "sha-a",
       startedAt: 1000,
       livenessMs: 200,
     });
@@ -31,7 +31,7 @@ test(
 
     const peer = createPostgresInstanceRegistry(pool, {
       instanceId: "i-peer",
-      buildSha: "sha-a",
+      deploymentKey: "sha-a",
       startedAt: 2000,
       livenessMs: 200,
     });
@@ -40,7 +40,7 @@ test(
 
     const next = createPostgresInstanceRegistry(pool, {
       instanceId: "i-new",
-      buildSha: "sha-b",
+      deploymentKey: "sha-b",
       startedAt: 3000,
       livenessMs: 200,
     });
@@ -82,5 +82,37 @@ test(
     };
     assert.equal(await boot(false, "sha-inactive"), 0, "an inactive stack must leave no heartbeat behind");
     assert.equal(await boot(true, "sha-active"), 1, "a claiming instance still announces itself");
+  },
+);
+
+test(
+  "a configured deployment id keys the heartbeat, so a config-only redeploy of one build still supersedes",
+  { skip },
+  async () => {
+    await import("./support/auto-fake-sprites.ts");
+    const [{ buildApp }, { testConfig }] = await Promise.all([
+      import("./support/build-app.ts"),
+      import("./support/test-config.ts"),
+    ]);
+    const pool = createPostgresMapFactory(URL!).pool;
+    const built = buildApp(
+      testConfig({
+        databaseUrl: URL,
+        buildSha: "sha-shared",
+        backgroundDeploymentId: "deployment-green",
+        workers: 1,
+        reaperIntervalMs: 60_000,
+      }),
+    );
+    built.runtime.start();
+    const keys = async (): Promise<string[]> =>
+      (await pool.query("SELECT DISTINCT build_sha FROM instance_heartbeats WHERE build_sha IN ($1, $2)", [
+        "sha-shared",
+        "deployment-green",
+      ])).rows.map((row) => (row as { build_sha: string }).build_sha);
+    await settle(async () => (await keys()).length > 0);
+    const seen = await keys();
+    await built.runtime.stop();
+    assert.deepEqual(seen, ["deployment-green"]);
   },
 );

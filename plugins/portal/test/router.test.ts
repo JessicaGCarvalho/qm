@@ -17,7 +17,6 @@ const VALID_SOURCE_SIGNATURE = "v0=valid-source-signature";
 const upstream = createServer((req: IncomingMessage, res) => {
   if (
     req.url?.startsWith("/v1/deployment-layer") ||
-    req.url?.startsWith("/v1/background-work") ||
     req.url?.startsWith("/v1/deployment/live-session")
   ) {
     deploymentLayerRequests++;
@@ -730,12 +729,8 @@ test("impersonate: an admin starts it; the web-ui hop carries target + impersona
   assert.match(stop.headers.get("set-cookie") ?? "", /portal_impersonate=;[^,]*Max-Age=0/);
 });
 
-test("background ownership forwards both credentials only on its exact control routes", async () => {
-  for (const [method, path] of [
-    ["GET", "/v1/background-work"],
-    ["POST", "/v1/background-work"],
-    ["POST", "/v1/deployment/live-session"],
-  ]) {
+test("the deployment live session forwards both credentials only on its exact route", async () => {
+  for (const [method, path] of [["POST", "/v1/deployment/live-session"]]) {
     const response = await fetch(`${base}${path}`, {
       method,
       headers: {
@@ -757,8 +752,6 @@ test("background ownership forwards both credentials only on its exact control r
     if (method === "POST") assert.equal(payload.body, '{"expectedGeneration":0}');
   }
   for (const [method, path] of [
-    ["PUT", "/v1/background-work"],
-    ["GET", "/v1/background-work/nearby"],
     ["GET", "/v1/deployment/live-session"],
     ["POST", "/v1/deployment/live-session/nearby"],
   ]) {

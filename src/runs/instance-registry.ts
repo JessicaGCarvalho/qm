@@ -12,7 +12,7 @@ export function createNoopInstanceRegistry(): InstanceRegistry {
 
 export function createPostgresInstanceRegistry(
   pg: PgPool,
-  opts: { instanceId: string; buildSha: string; startedAt: number; livenessMs?: number },
+  opts: { instanceId: string; deploymentKey: string; startedAt: number; livenessMs?: number },
 ): InstanceRegistry {
   const livenessMs = opts.livenessMs ?? INSTANCE_LIVENESS_MS;
   let readyP: Promise<void> | null = null;
@@ -43,7 +43,7 @@ export function createPostgresInstanceRegistry(
         `INSERT INTO instance_heartbeats(instance_id, build_sha, started_at, beat_at)
            VALUES ($1, $2, $3, now())
          ON CONFLICT (instance_id) DO UPDATE SET beat_at = now()`,
-        [opts.instanceId, opts.buildSha, String(opts.startedAt)],
+        [opts.instanceId, opts.deploymentKey, String(opts.startedAt)],
       );
       await pg.query(`DELETE FROM instance_heartbeats WHERE beat_at < now() - interval '1 hour'`, []);
       const { rowCount } = await pg.query(
@@ -51,7 +51,7 @@ export function createPostgresInstanceRegistry(
           WHERE build_sha <> $1 AND started_at > $2
             AND beat_at > now() - ($3 || ' milliseconds')::interval
           LIMIT 1`,
-        [opts.buildSha, String(opts.startedAt), String(livenessMs)],
+        [opts.deploymentKey, String(opts.startedAt), String(livenessMs)],
       );
       return rowCount > 0;
     },
