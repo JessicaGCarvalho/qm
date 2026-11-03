@@ -17,6 +17,7 @@ const DRAIN_SWEEP_MS = 10_000;
 export function createDrainController(opts: { registry: InstanceRegistry; sweepMs?: number }): DrainController {
   let superseded = false;
   let applied: boolean | undefined;
+  let settled = true;
   let services: BackgroundServices | undefined;
   let transition: Promise<void> | null = null;
   const apply = async (target: boolean, current: BackgroundServices): Promise<void> => {
@@ -24,9 +25,16 @@ export function createDrainController(opts: { registry: InstanceRegistry; sweepM
       console.error(
         `[drain] ${target ? "newer build is live — draining: no new run claims, cron fires or Slack connections; finishing in-flight turns" : "newer build gone — resuming run claims, cron fires and Slack connections"}`,
       );
-    if (target) await current.standDown();
-    else current.resume();
-    applied = target;
+    try {
+      if (target || !settled) await current.standDown();
+      if (!target) current.resume();
+      settled = true;
+      applied = target;
+    } catch (error) {
+      settled = false;
+      applied = undefined;
+      throw error;
+    }
   };
   const sweeper: Sweeper = createSweeper(
     async () => {
@@ -49,6 +57,7 @@ export function createDrainController(opts: { registry: InstanceRegistry; sweepM
     async stop() {
       services = undefined;
       await sweeper.stop();
+      await opts.registry.retire();
     },
     canClaim: () => !superseded,
   };

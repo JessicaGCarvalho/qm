@@ -43,7 +43,7 @@ function bootBuild(url: string, deploymentKey: string, startedAt: number) {
       instanceId: `${deploymentKey}-1`,
       deploymentKey,
       startedAt,
-      livenessMs: 400,
+      livenessMs: 5_000,
     }),
     sweepMs: 25,
   });
@@ -102,9 +102,14 @@ test("starting a newer build stands the older one down; stopping it brings the o
     } finally {
       await b.stop();
     }
+    const stoppedAt = Date.now();
 
     await settle(async () => a.cron.running && a.slack.connected);
-    assert.ok(a.cron.running && a.slack.connected, "the older build resumed cron and Slack once the newer one died");
+    assert.ok(a.cron.running && a.slack.connected, "the older build resumed cron and Slack once the newer one stopped");
+    assert.ok(
+      Date.now() - stoppedAt < 5_000,
+      "a cleanly stopped build hands back without waiting for its heartbeat to expire",
+    );
     assert.equal(a.cron.starts, 2);
     assert.equal(a.slack.connects, 2);
     const third = (await a.runs.enqueue({ sessionId: "s3", request: turn("t3"), maxAttempts: 3 })).run;
@@ -113,4 +118,30 @@ test("starting a newer build stands the older one down; stopping it brings the o
   } finally {
     await a.stop();
   }
+});
+
+test("a stand-down that fails while the newer build disappears is settled before resuming", async () => {
+  let superseded = false;
+  const calls: string[] = [];
+  let failNext = false;
+  const drain = createDrainController({
+    registry: { beat: async () => superseded, retire: async () => {} },
+    sweepMs: 10,
+  });
+  drain.start({
+    resume: () => calls.push("resume"),
+    async standDown() {
+      calls.push("standDown");
+      if (!failNext) return;
+      failNext = false;
+      superseded = false;
+      throw new Error("scheduler stop failed");
+    },
+  });
+  await settle(async () => calls.length === 1);
+  failNext = true;
+  superseded = true;
+  await settle(async () => calls.length === 4);
+  assert.deepEqual(calls, ["resume", "standDown", "standDown", "resume"]);
+  await drain.stop();
 });

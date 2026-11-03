@@ -4528,10 +4528,7 @@ async function checkLive(
   }
   if (!failures.length) {
     try {
-      const backgroundOff = ["0", "false", "no", "off", "none"].includes(
-        config.env.core?.BACKGROUND_WORK_ENABLED?.trim().toLowerCase() ?? "",
-      );
-      if (manifest.backgroundDeploymentId && !backgroundOff) {
+      if (manifest.backgroundDeploymentId && awsBackgroundWorkBootState(config)?.enabled) {
         await checkControlledLiveSession(manifest.backgroundDeploymentId, awsLiveSessionRequest(config));
       } else {
         await awsLiveSession(config, states.get("core")!);

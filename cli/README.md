@@ -128,14 +128,18 @@ the deployment manifest. A no-op deployment and automatic ECS task replacement k
 that identity; an explicit core restart allocates a new one.
 
 Every core process with background work enabled heartbeats under its deployment
-identity (its build hash when it has none). When a deployment with another identity
-started more recently and is still heartbeating, the older one stops claiming runs,
-stops its cron scheduler and closes its Slack connections within ten seconds, and
-finishes admitted work under its leases. It resumes about forty seconds after the
-newer deployment's last heartbeat. Background work therefore follows the most
-recently started deployment that has `BACKGROUND_WORK_ENABLED` on: to hand it to
-another stack, start that stack with background work enabled; to hand it back,
-stop that stack's core tasks (`qm down`) or turn its background work off.
+identity (its build hash when it has none). A deployment counts as started when its
+earliest live process started. When a deployment with another identity started more
+recently and is still heartbeating, the older one stops claiming runs, stops its
+cron scheduler and closes its Slack connections within ten seconds, and finishes
+admitted work under its leases. It resumes within ten seconds after the newer
+deployment's processes shut down cleanly, or about forty seconds after their last
+heartbeat if they die. Background work therefore follows the most recently started
+deployment that has `BACKGROUND_WORK_ENABLED` on: to hand it to another stack, start
+that stack with background work enabled; to hand it back, stop that stack's core
+tasks (`qm down`) or turn its background work off. Turning background work on for a
+stack whose flag is already on replaces no tasks, so rolling back to a stack that
+never turned its flag off means turning the newer stack's background work off.
 
 The exported `awsBackgroundWorkBootState` reads the exact manifest core task to
 return its recorded boot flag and optional deployment identity. It returns

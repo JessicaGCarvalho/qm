@@ -123,7 +123,12 @@ built.runtime.start({
     for (const runtime of slackRuntimes) runtime.start();
   },
   async standDown() {
-    await Promise.all([built.scheduler.stopClaims(), ...slackRuntimes.map((runtime) => runtime.stop())]);
+    const stopped = await Promise.allSettled([
+      built.scheduler.stopClaims(),
+      ...slackRuntimes.map((runtime) => runtime.stop()),
+    ]);
+    const failures = stopped.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
+    if (failures.length) throw new AggregateError(failures, "background stand-down failed");
   },
 });
 

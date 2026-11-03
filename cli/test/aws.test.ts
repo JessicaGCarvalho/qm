@@ -5826,7 +5826,11 @@ test("controlled AWS stacks allocate identities, verify the running stack in pla
   writeFileSync(dockerBin, `#!/usr/bin/env node\nconsole.log("Digest: sha256:${"a".repeat(64)}");\n`);
   chmodSync(dockerBin, 0o755);
   const base = oneServiceConfig();
-  const single: QmConfig = { ...base, aws: { ...base.aws!, backgroundWorkControl: true } };
+  const single: QmConfig = {
+    ...base,
+    env: { ...base.env, core: { ...base.env.core, BACKGROUND_WORK_ENABLED: "1" } },
+    aws: { ...base.aws!, backgroundWorkControl: true },
+  };
   const fake = statefulAws(dir, single);
   const priorPath = process.env.PATH;
   process.env.PATH = `${dir}:${priorPath}`;

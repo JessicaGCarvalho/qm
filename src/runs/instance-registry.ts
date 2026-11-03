@@ -2,12 +2,13 @@ import type { PgPool } from "../persistence/pg-pool.ts";
 
 export interface InstanceRegistry {
   beat(): Promise<boolean>;
+  retire(): Promise<void>;
 }
 
 const INSTANCE_LIVENESS_MS = 30_000;
 
 export function createNoopInstanceRegistry(): InstanceRegistry {
-  return { beat: async () => false };
+  return { beat: async () => false, retire: async () => {} };
 }
 
 export function createPostgresInstanceRegistry(
@@ -47,13 +48,21 @@ export function createPostgresInstanceRegistry(
       );
       await pg.query(`DELETE FROM instance_heartbeats WHERE beat_at < now() - interval '1 hour'`, []);
       const { rowCount } = await pg.query(
-        `SELECT 1 FROM instance_heartbeats
-          WHERE build_sha <> $1 AND started_at > $2
-            AND beat_at > now() - ($3 || ' milliseconds')::interval
+        `WITH live AS (
+           SELECT build_sha, min(started_at) AS started_at FROM instance_heartbeats
+            WHERE beat_at > now() - ($2 || ' milliseconds')::interval
+            GROUP BY build_sha
+         )
+         SELECT 1 FROM live other JOIN live own ON own.build_sha = $1
+          WHERE other.build_sha <> $1 AND other.started_at > own.started_at
           LIMIT 1`,
-        [opts.deploymentKey, String(opts.startedAt), String(livenessMs)],
+        [opts.deploymentKey, String(livenessMs)],
       );
       return rowCount > 0;
+    },
+    async retire(): Promise<void> {
+      if (!readyP) return;
+      await pg.query(`DELETE FROM instance_heartbeats WHERE instance_id = $1`, [opts.instanceId]);
     },
   };
 }
