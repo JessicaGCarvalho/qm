@@ -422,7 +422,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (env.NODE_ENV === "production" && !env.PUBLIC_PORT?.trim())
     throw new Error("PUBLIC_PORT is required in production: core serves the web UI and sign-in on it");
   if (env.PUBLIC_PORT?.trim() && env.PUBLIC_PORT.trim() === (env.PORT?.trim() || "8080"))
-    throw new Error(`PUBLIC_PORT and PORT are both ${env.PUBLIC_PORT.trim()}; core's API and its public front door need separate ports`);
+    throw new Error(
+      `PUBLIC_PORT and PORT are both ${env.PUBLIC_PORT.trim()}; core's API and its public front door need separate ports`,
+    );
   const modelProvider = modelProviderEnvStrict(env);
   const sandbox = sandboxSettings(env);
   const dataDir = resolve(env.DATA_DIR ?? "./data");
