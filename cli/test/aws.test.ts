@@ -5490,7 +5490,7 @@ test("shared ALB validates company routes while rejecting sibling overlap", () =
   }
 });
 
-test("shared ALB finds a named front-door target group through core's frontDoorTargetGroup", () => {
+test("shared ALB finds the front door's target group through core's targetGroup", () => {
   const company = { ...config, aws: { ...config.aws!, sharedAlb: true, alb: "shared" } };
   const door = { blueGreen: true, frontDoorTargetGroup: "acme-portal-tg" };
   const services = new Map([["core", { loadBalancers: frontDoorAttachments(door) }]]);
@@ -5509,7 +5509,7 @@ test("shared ALB finds a named front-door target group through core's frontDoorT
             ...company.aws,
             services: {
               ...company.aws.services,
-              core: { ...company.aws.services.core!, frontDoorTargetGroup: "acme-portal-tg" },
+              core: { ...company.aws.services.core!, targetGroup: "acme-portal-tg" },
             },
           },
         },
