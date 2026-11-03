@@ -87,7 +87,15 @@ export async function resolveLiveApproval(
     });
     return { kind: "ignored" };
   }
-  if (!(await ctx.recordDecision(decision.requestId, record, decision.approved))) return { kind: "ignored" };
+  if (!(await ctx.recordDecision(decision.requestId, record, decision.approved))) {
+    ctx.audit({
+      action: `command_approval.${verdict}`,
+      resource: decision.requestId,
+      status: "refused",
+      detail: JSON.stringify({ approvalOutcome: "already_decided", delivery: "live_run" }),
+    });
+    return { kind: "ignored" };
+  }
   const approver = request.actor.displayName?.trim() || "The requesting human";
   const summary = record.summary ?? record.command;
   if (!decision.approved) {

@@ -232,6 +232,13 @@ for (const approved of [true, false]) {
         recorded.map((e) => e.type),
         ["tool_call", "tool_result"],
       );
+      const notes = sink.filter((e) => JSON.stringify(e.payload).includes("approved the pending call"));
+      assert.equal(notes.length, 1, "the live note is recorded once");
+      assert.doesNotMatch(
+        JSON.stringify(notes[0]!.payload),
+        /push 18767/,
+        "the recorded note does not repeat the result",
+      );
     } else {
       assert.match(followUp, /Gabrielle denied the pending call history, so it did not run/);
       assert.ok(!sink.some((e) => e.type === "tool_call"));

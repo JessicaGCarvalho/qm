@@ -1152,6 +1152,7 @@ export function createAgent(opts?: AgentOptions): Agent {
         let steerWake = new AbortController();
         entry.ref.steered = steerWake.signal;
         const pendingSteers: Array<SteerIntake & { prompt: string }> = [];
+        const approvalSteers = new Map<string, string>();
         let persistError: Error | undefined;
         const persist = (write: () => Promise<unknown>): void => {
           thinkTail = thinkTail.then(async () => {
@@ -1182,10 +1183,16 @@ export function createAgent(opts?: AgentOptions): Agent {
               steerWake = new AbortController();
               entry.ref.steered = steerWake.signal;
             }
+            const recorded = approvalSteers.get(text) ?? text;
+            approvalSteers.delete(text);
             persist(() =>
               steer
                 ? recordSteerIntake(turn, steer)
-                : turn.emit({ type: "system", payload: { kind: WAKE_KIND, text }, scopeLabel: turn.scopeLabel }),
+                : turn.emit({
+                    type: "system",
+                    payload: { kind: WAKE_KIND, text: recorded },
+                    scopeLabel: turn.scopeLabel,
+                  }),
             );
           }
           await thinkTail;
@@ -1290,23 +1297,25 @@ export function createAgent(opts?: AgentOptions): Agent {
                       const decided = await turn.resolveSteeredApproval(request);
                       if (decided.kind === "ignored") return;
                       const settled = (async () => {
-                        const note =
-                          decided.kind === "denied"
-                            ? deniedCallSteerNote(decided)
-                            : approvedCallSteerNote(
-                                decided,
-                                await runApprovedToolCall(decided.call, entry.ref, tools as unknown as BridgedTool[], {
-                                  scopeLabel: turn.scopeLabel,
-                                  cancel: toolAbort.signal,
-                                }),
-                              );
+                        const ran =
+                          decided.kind === "run"
+                            ? await runApprovedToolCall(decided.call, entry.ref, tools as unknown as BridgedTool[], {
+                                scopeLabel: turn.scopeLabel,
+                                cancel: toolAbort.signal,
+                              })
+                            : null;
+                        const note = (withResult: boolean) =>
+                          decided.kind === "run" && ran
+                            ? approvedCallSteerNote(decided, ran, withResult)
+                            : deniedCallSteerNote(decided);
                         if (entry.agentSession.isStreaming) {
-                          await entry.agentSession.steer(note);
+                          approvalSteers.set(note(true), note(false));
+                          await entry.agentSession.steer(note(true));
                           steerWake.abort();
                         } else
                           await entry.ref.emit?.({
                             type: "user",
-                            payload: { hidden: true, text: note },
+                            payload: { hidden: true, text: note(false) },
                             scopeLabel: turn.scopeLabel,
                           });
                       })().catch(swallowAs("pi: live approval outcome", undefined));

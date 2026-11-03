@@ -324,12 +324,14 @@ export async function runApprovedToolCall(
 export function approvedCallSteerNote(
   outcome: { summary: string; approver: string },
   ran: ApprovedToolCallOutcome,
+  withResult: boolean,
 ): string {
-  return (
+  const head =
     `[system] ${outcome.approver} approved the pending call ${outcome.summary}, and QM ran it exactly as approved` +
-    `${ran.isError ? "; it returned an error" : ""}. Result:\n${ran.text}\n` +
-    "Do not call it again; continue with this result."
-  );
+    (ran.isError ? "; it returned an error" : "");
+  return withResult
+    ? `${head}. Result:\n${ran.text}\nDo not call it again; continue with this result.`
+    : `${head}. Its result is recorded in this conversation. Do not call it again.`;
 }
 
 export function deniedCallSteerNote(outcome: { summary: string; approver: string }): string {
