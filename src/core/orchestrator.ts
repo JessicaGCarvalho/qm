@@ -123,7 +123,13 @@ import {
   type ToolResultScreen,
   type ToolResultScreenInput,
 } from "../security/security-posture.ts";
-import { approvedCallId, commandApprovalId, inputApprovalId, TOOL_CALL_APPROVAL_PREFIX } from "./approval-id.ts";
+import {
+  approvalCardId,
+  approvedCallId,
+  commandApprovalId,
+  inputApprovalId,
+  TOOL_CALL_APPROVAL_PREFIX,
+} from "./approval-id.ts";
 import { APPROVED_CALL_RAN_NOTE, approvalView, grantModesWithin } from "./orchestrator/approvals.ts";
 import { createPerTurnStrategy } from "../memory/strategies/per-turn.ts";
 import { DEFAULT_MEMORY_POLICY } from "../memory/policy.ts";
@@ -2772,12 +2778,12 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
 
         baseTools.withdrawApproval = async (card: string) => {
           const cardId = card.trim().toLowerCase();
-          if (!/^[0-9a-f]{6,64}$/.test(cardId)) return { withdrawn: [] };
           const rows = await pending.selectEntries({ where: { field: "sessionId", anyOfFold: [session.id] } });
           const withdrawn: string[] = [];
           for (const [requestId, record] of rows) {
             if (record.sessionId !== session.id || !record.call) continue;
-            if (!record.approvalKey?.startsWith(`${TOOL_CALL_APPROVAL_PREFIX}${cardId}`)) continue;
+            if (!record.approvalKey?.startsWith(TOOL_CALL_APPROVAL_PREFIX)) continue;
+            if (approvalCardId(record.approvalKey) !== cardId) continue;
             await pending.delete(requestId);
             withdrawn.push(record.summary ?? record.command);
             audit({

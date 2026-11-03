@@ -16,6 +16,10 @@ export function toolCallApprovalKey(tool: string, params: unknown): string {
   return `${TOOL_CALL_APPROVAL_PREFIX}${hashId([tool, canonicalJson(params ?? null)], 64)}`;
 }
 
+export function approvalCardId(callKey: string): string {
+  return callKey.slice(TOOL_CALL_APPROVAL_PREFIX.length, TOOL_CALL_APPROVAL_PREFIX.length + 12);
+}
+
 export function approvedCallId(requestId: string): string {
   return `approved_${requestId}_${randomBytes(4).toString("hex")}`;
 }

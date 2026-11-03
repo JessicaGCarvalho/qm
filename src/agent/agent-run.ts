@@ -1283,7 +1283,6 @@ export function createAgent(opts?: AgentOptions): Agent {
                 turn.runId,
                 {
                   onSteer: async (text, ts, request, acknowledge) => {
-                    console.error("DBG onSteer", text, !!request?.approval, entry.agentSession.isStreaming);
                     if (request?.approval) {
                       if (!turn.resolveSteeredApproval) return false;
                       if (!entry.agentSession.isStreaming || toolAbort.signal.aborted) return false;

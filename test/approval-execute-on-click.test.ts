@@ -180,19 +180,13 @@ for (const approved of [true, false]) {
       requests.push((JSON.parse(String(init?.body ?? "{}")) as { messages?: ProviderMessage[] }).messages ?? []);
       if (requests.length === 1) {
         setTimeout(() => {
-          void signals
-            .send(runId, {
-              kind: "steer",
-              text: "[approval decision]",
-              ts: "approval:req2",
-              dedupeKey: `approval:${runId}`,
-              request: approvalRequest("req2", approved),
-            })
-            .then(
-              (ok) => console.error("DBG sent", ok),
-              (e) => console.error("DBG send err", e),
-            );
-          setTimeout(release, 400);
+          void signals.send(runId, {
+            kind: "steer",
+            text: "[approval decision]",
+            ts: "approval:req2",
+            dedupeKey: `approval:${runId}`,
+            request: approvalRequest("req2", approved),
+          });
         }, 30);
         return gatedSse(textReplyEvents("looking at the sheet"), released);
       }
@@ -210,6 +204,7 @@ for (const approved of [true, false]) {
           } as unknown as ToolContext,
           resolveSteeredApproval: async (request): Promise<SteeredApproval> => {
             decided.push(request);
+            setTimeout(release, 200);
             if (!request.approval?.approved) return { kind: "denied", summary: "history", approver: "Gabrielle" };
             return {
               kind: "run",

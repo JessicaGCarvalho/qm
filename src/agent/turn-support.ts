@@ -6,6 +6,7 @@ import {
   SECURITY_SCREEN_SYSTEM_PROMPT,
 } from "../security/security-posture.ts";
 import type { ScopeId, SessionEntry } from "../types.ts";
+import type { ResumableToolCall } from "../core/turn-resume.ts";
 import { createAgentTools, type AgentToolsOptions, type ToolContextRef } from "./agent-tools.ts";
 import { goalWorkFromEntries } from "./goal.ts";
 import type {
@@ -157,81 +158,17 @@ export function bridgedTools(ref: ToolContextRef, options: AgentToolsOptions): B
   return createAgentTools(ref, options) as unknown as BridgedTool[];
 }
 
+type ToolResultContent = NonNullable<Awaited<ReturnType<BridgedTool["execute"]>>["content"]>;
+
 export interface ResumedToolResult {
   history: SessionEntry[];
   message: {
     role: "toolResult";
     toolCallId: string;
     toolName: string;
-    content: NonNullable<Awaited<ReturnType<BridgedTool["execute"]>>["content"]>;
+    content: ToolResultContent;
     isError: boolean;
     timestamp: number;
-  };
-}
-
-export async function resumeInterruptedToolCall(
-  turn: AgentTurnInput,
-  ref: ToolContextRef,
-  tools: readonly BridgedTool[],
-): Promise<ResumedToolResult | null> {
-  const call = turn.resumeToolCall;
-  if (!call) return null;
-  const tool = tools.find((candidate) => candidate.name === call.tool);
-  const emit = ref.emit;
-  const abortSignal = ref.abortSignal;
-  let recorded: SessionEntry | undefined;
-  ref.emit = async (entry) => {
-    if (entry.type === "tool_call") return;
-    const appended = await emit?.(entry);
-    if (entry.type === "tool_result" && !recorded) recorded = appended as SessionEntry;
-    return appended;
-  };
-  ref.abortSignal = turn.cancel;
-  let content: ResumedToolResult["message"]["content"] = [{ type: "text", text: INTERRUPTED_TOOL_RESULT }];
-  let isError = true;
-  try {
-    if (tool && !turn.cancel?.aborted) {
-      content = (await tool.execute(call.callId, call.input)).content ?? [];
-      isError = false;
-    } else {
-      console.error(
-        `[agent] resume: ${tool ? "turn cancelled" : `tool ${call.tool} unavailable on this turn`}; recording call ${call.callId} as interrupted`,
-      );
-    }
-    if (!recorded) {
-      await ref.emit({
-        type: "tool_result",
-        payload: { tool: call.tool, callId: call.callId, isError, result: content[0]?.text ?? "", interrupted: true },
-        scopeLabel: turn.scopeLabel,
-      });
-    }
-  } catch (error) {
-    const payload = recorded?.payload as { result?: unknown; isError?: unknown } | undefined;
-    isError = payload ? payload.isError === true : true;
-    content = [{ type: "text", text: payload ? String(payload.result ?? "") : `[error] ${errMessage(error)}` }];
-    if (!recorded)
-      await ref.emit({
-        type: "tool_result",
-        payload: { tool: call.tool, callId: call.callId, isError, result: content[0]!.text },
-        scopeLabel: turn.scopeLabel,
-      });
-  } finally {
-    ref.emit = emit;
-    ref.abortSignal = abortSignal;
-  }
-  if (!recorded) return null;
-  if (!isError)
-    console.log(`[agent] resume: re-ran retry-safe ${call.tool} call ${call.callId} as seq ${recorded.seq}`);
-  return {
-    history: [...turn.history, recorded],
-    message: {
-      role: "toolResult",
-      toolCallId: call.callId,
-      toolName: call.tool,
-      content,
-      isError,
-      timestamp: recorded.createdAt,
-    },
   };
 }
 
@@ -241,16 +178,132 @@ export interface ApprovedToolCallOutcome {
   isError: boolean;
 }
 
-const APPROVED_RESULT_NOTE_MAX_CHARS = 4_000;
-
-function approvedCallRoute(
-  call: ApprovedToolCall,
+function toolCallRoute(
+  call: ResumableToolCall,
   tools: readonly BridgedTool[],
+  viaConnector: boolean,
 ): { tool: BridgedTool; args: unknown } | null {
   const direct = tools.find((candidate) => candidate.name === call.tool);
   if (direct) return { tool: direct, args: call.input };
+  if (!viaConnector) return null;
   const connector = tools.find((candidate) => candidate.name === "mcp_call");
   return connector ? { tool: connector, args: { tool: call.tool, args: call.input } } : null;
+}
+
+// Runs one recorded tool call outside the model loop and records exactly one result for it.
+// `fresh` marks a call the transcript has not seen yet: its tool_call is recorded and both
+// entries carry `fresh` in their payload. Without it the call is a resumed one whose
+// tool_call is already in the transcript.
+async function runToolCallOnce(
+  call: ResumableToolCall,
+  ref: ToolContextRef,
+  tools: readonly BridgedTool[],
+  opts: {
+    scopeLabel: ScopeId;
+    cancel?: AbortSignal;
+    fresh?: Record<string, unknown>;
+    notRun: (reason: "unavailable" | "cancelled") => { text: string; payload?: Record<string, unknown> };
+  },
+): Promise<ApprovedToolCallOutcome & { result?: SessionEntry; content: ToolResultContent }> {
+  const emit = ref.emit;
+  const abortSignal = ref.abortSignal;
+  const tag = opts.fresh ?? {};
+  const entries: SessionEntry[] = [];
+  let result: SessionEntry | undefined;
+  const append = async (entry: Parameters<NonNullable<typeof emit>>[0]) => {
+    const appended = (await emit?.(entry)) as SessionEntry | undefined;
+    if (appended) entries.push(appended);
+    return appended;
+  };
+  const recordCall = async () => {
+    if (opts.fresh && !entries.some((e) => e.type === "tool_call"))
+      await append({
+        type: "tool_call",
+        payload: { tool: call.tool, callId: call.callId, ...tag },
+        scopeLabel: opts.scopeLabel,
+      });
+  };
+  const recordResult = async (payload: Record<string, unknown>) => {
+    await recordCall();
+    result = await append({
+      type: "tool_result",
+      payload: { tool: call.tool, callId: call.callId, ...payload, ...tag },
+      scopeLabel: opts.scopeLabel,
+    });
+  };
+  ref.emit = async (entry) => {
+    const payload = (entry.payload ?? {}) as Record<string, unknown>;
+    if (entry.type === "tool_call") {
+      if (!opts.fresh) return undefined;
+      if (payload.callId !== call.callId || entries.some((e) => e.type === "tool_call")) return emit?.(entry);
+      return append({ ...entry, payload: { ...payload, ...tag } });
+    }
+    if (entry.type !== "tool_result" || result || (opts.fresh && payload.callId !== call.callId)) return emit?.(entry);
+    await recordCall();
+    result = await append({ ...entry, payload: { ...payload, ...tag } });
+    return result;
+  };
+  ref.abortSignal = opts.cancel;
+  let text: string;
+  let content: ToolResultContent;
+  let isError = true;
+  try {
+    const route = toolCallRoute(call, tools, !!opts.fresh);
+    if (!route || opts.cancel?.aborted) {
+      const reason = route ? "cancelled" : "unavailable";
+      console.error(
+        `[agent] ${opts.fresh ? "approved call" : "resume"}: ${call.tool} ${reason}; call ${call.callId} did not run`,
+      );
+      const notRun = opts.notRun(reason);
+      text = notRun.text;
+      content = [{ type: "text", text }];
+      if (!result) await recordResult({ isError: true, result: text, ...notRun.payload });
+    } else {
+      content = (await route.tool.execute(call.callId, route.args)).content ?? [];
+      text = content.flatMap((block) => (typeof block.text === "string" ? [block.text] : [])).join("\n");
+      isError = false;
+      if (!result) await recordResult({ isError, result: text });
+    }
+  } catch (error) {
+    const recorded = result?.payload as { result?: unknown; isError?: unknown } | undefined;
+    isError = recorded ? recorded.isError === true : true;
+    text = recorded ? String(recorded.result ?? "") : `[error] ${errMessage(error)}`;
+    content = [{ type: "text", text }];
+    if (!result) await recordResult({ isError, result: text });
+  } finally {
+    ref.emit = emit;
+    ref.abortSignal = abortSignal;
+  }
+  if (result && (result.payload as { isError?: unknown } | null)?.isError === true) isError = true;
+  return { entries, text, content, isError, ...(result ? { result } : {}) };
+}
+
+export async function resumeInterruptedToolCall(
+  turn: AgentTurnInput,
+  ref: ToolContextRef,
+  tools: readonly BridgedTool[],
+): Promise<ResumedToolResult | null> {
+  const call = turn.resumeToolCall;
+  if (!call) return null;
+  const ran = await runToolCallOnce(call, ref, tools, {
+    scopeLabel: turn.scopeLabel,
+    ...(turn.cancel ? { cancel: turn.cancel } : {}),
+    notRun: () => ({ text: INTERRUPTED_TOOL_RESULT, payload: { interrupted: true } }),
+  });
+  if (!ran.result) return null;
+  if (!ran.isError)
+    console.log(`[agent] resume: re-ran retry-safe ${call.tool} call ${call.callId} as seq ${ran.result.seq}`);
+  return {
+    history: [...turn.history, ran.result],
+    message: {
+      role: "toolResult",
+      toolCallId: call.callId,
+      toolName: call.tool,
+      content: ran.content,
+      isError: ran.isError,
+      timestamp: ran.result.createdAt,
+    },
+  };
 }
 
 export async function runApprovedToolCall(
@@ -259,67 +312,16 @@ export async function runApprovedToolCall(
   tools: readonly BridgedTool[],
   opts: { scopeLabel: ScopeId; cancel?: AbortSignal },
 ): Promise<ApprovedToolCallOutcome> {
-  const emit = ref.emit;
-  const entries: SessionEntry[] = [];
-  let called = false;
-  let resulted = false;
-  const tag = { approvedRequestId: call.requestId };
-  const recordCall = async (): Promise<void> => {
-    if (called) return;
-    called = true;
-    const appended = await emit?.({
-      type: "tool_call",
-      payload: { tool: call.tool, callId: call.callId, ...tag },
-      scopeLabel: opts.scopeLabel,
-    });
-    if (appended) entries.push(appended as SessionEntry);
-  };
-  ref.emit = async (entry) => {
-    const payload = (entry.payload ?? {}) as Record<string, unknown>;
-    if (payload.callId !== call.callId) return emit?.(entry);
-    if (entry.type === "tool_call") {
-      if (called) return undefined;
-      called = true;
-      const appended = await emit?.({ ...entry, payload: { ...payload, ...tag } });
-      if (appended) entries.push(appended as SessionEntry);
-      return appended;
-    }
-    if (entry.type === "tool_result") {
-      await recordCall();
-      resulted = true;
-      const appended = await emit?.({ ...entry, payload: { ...payload, ...tag } });
-      if (appended) entries.push(appended as SessionEntry);
-      return appended;
-    }
-    return emit?.(entry);
-  };
-  let text = "";
-  let isError = true;
-  try {
-    const route = approvedCallRoute(call, tools);
-    if (!route) text = `[error] the approved tool ${call.tool} is not available on this turn, so it did not run`;
-    else if (opts.cancel?.aborted) text = "[error] the turn was cancelled before the approved call ran";
-    else {
-      const result = await route.tool.execute(call.callId, route.args);
-      text = (result.content ?? []).flatMap((block) => (typeof block.text === "string" ? [block.text] : [])).join("\n");
-      isError = false;
-    }
-  } catch (error) {
-    text = `[error] ${errMessage(error)}`;
-  } finally {
-    ref.emit = emit;
-  }
-  const recordedResult = entries.find((e) => e.type === "tool_result");
-  if (recordedResult) isError = (recordedResult.payload as { isError?: unknown } | null)?.isError === true || isError;
-  if (!resulted) {
-    await recordCall();
-    const appended = await emit?.({
-      type: "tool_result",
-      payload: { tool: call.tool, callId: call.callId, isError, result: text, ...tag },
-      scopeLabel: opts.scopeLabel,
-    });
-    if (appended) entries.push(appended as SessionEntry);
-  }
+  const { entries, text, isError } = await runToolCallOnce(call, ref, tools, {
+    ...opts,
+    fresh: { approvedRequestId: call.requestId },
+    notRun: (reason) => ({
+      text:
+        reason === "unavailable"
+          ? `[error] the approved tool ${call.tool} is not available on this turn, so it did not run`
+          : "[error] the turn was cancelled before the approved call ran",
+    }),
+  });
   return { entries, text, isError };
 }
 
@@ -327,13 +329,9 @@ export function approvedCallSteerNote(
   outcome: { summary: string; approver: string },
   ran: ApprovedToolCallOutcome,
 ): string {
-  const clipped =
-    ran.text.length > APPROVED_RESULT_NOTE_MAX_CHARS
-      ? `${ran.text.slice(0, APPROVED_RESULT_NOTE_MAX_CHARS)}… [truncated; the full result is recorded in this conversation]`
-      : ran.text;
   return (
     `[system] ${outcome.approver} approved the pending call ${outcome.summary}, and QM ran it exactly as approved` +
-    `${ran.isError ? "; it returned an error" : ""}. Result:\n${clipped}\n` +
+    `${ran.isError ? "; it returned an error" : ""}. Result:\n${ran.text}\n` +
     "Do not call it again; continue with this result."
   );
 }

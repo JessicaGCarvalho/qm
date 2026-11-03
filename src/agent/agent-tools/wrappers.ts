@@ -1,4 +1,4 @@
-import { toolCallApprovalKey } from "../../core/approval-id.ts";
+import { approvalCardId, toolCallApprovalKey } from "../../core/approval-id.ts";
 import { canonicalJson } from "../../../cli/src/canonical-json.ts";
 import { type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -68,7 +68,6 @@ const TOOL_APPROVAL_EXEMPT = new Set(["finish_silently", "tool_search", "mcp_cal
 const STRICT_TOOL_APPROVAL_REASON = "strict posture: this tool call requires human approval";
 const DECLARED_TOOL_APPROVAL_REASON = "this tool asks for approval before each call";
 const APPROVAL_ARGS_MAX_CHARS = 16_000;
-export const APPROVAL_CARD_ID_CHARS = 12;
 
 interface ToolApprovalDeclaration {
   needsApproval?: boolean | ((params: unknown) => boolean | Promise<boolean>);
@@ -81,13 +80,9 @@ async function declaredApprovalReason(tool: ToolApprovalDeclaration, params: unk
   return needed ? (tool.approvalReason ?? DECLARED_TOOL_APPROVAL_REASON) : undefined;
 }
 
-export function approvalCardId(callKey: string): string {
-  return callKey.replace(/^tool-call:/, "").slice(0, APPROVAL_CARD_ID_CHARS);
-}
-
 function keyedApprovalBlockedText(reason: string, callKey: string): string {
   return (
-    `[blocked: needs human approval] ${reason.replace(/[.\s]+$/, "")}. ` +
+    `[blocked: needs human approval] ${reason}. ` +
     `An approval card for this exact call (card ${approvalCardId(callKey)}) is now waiting for the person. ` +
     "If they approve it, QM runs exactly this call and records its result in this conversation, so do not propose it again. " +
     "If they change their mind before approving, withdraw the card with withdraw_approval."

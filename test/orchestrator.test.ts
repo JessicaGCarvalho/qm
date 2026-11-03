@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildApp as buildAppRaw } from "./support/build-app.ts";
 import { mockHeldTurns } from "./support/mock-agent.ts";
-import { toolCallApprovalKey } from "../src/core/approval-id.ts";
+import { approvalCardId, toolCallApprovalKey } from "../src/core/approval-id.ts";
 import { scopeId, type TurnRequest } from "../src/types.ts";
 import { TEST_CAPABILITY_SECRET, testConfig } from "./support/test-config.ts";
 import { runNowSettled } from "./support/settle.ts";
@@ -2836,7 +2836,7 @@ test("a withdrawn approval card can no longer be approved", async () => {
   assert.equal(raised.status, "ok");
   const card = raised.pendingApprovals![0]!;
   assert.equal(card.blocksInput, false, "the person can keep talking while the card waits");
-  const cardId = card.approvalKey!.replace(/^tool-call:/, "").slice(0, 12);
+  const cardId = approvalCardId(card.approvalKey!);
 
   const withdrawn = await app.turn(dm(`!withdraw ${cardId}`));
   assert.equal(withdrawn.reply, "withdrew example_send");
