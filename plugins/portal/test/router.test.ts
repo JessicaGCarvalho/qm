@@ -15,10 +15,7 @@ let deploymentLayerRequests = 0;
 const VALID_SOURCE_SIGNATURE = "v0=valid-source-signature";
 
 const upstream = createServer((req: IncomingMessage, res) => {
-  if (
-    req.url?.startsWith("/v1/deployment-layer") ||
-    req.url?.startsWith("/v1/deployment/live-session")
-  ) {
+  if (req.url?.startsWith("/v1/deployment-layer") || req.url?.startsWith("/v1/deployment/live-session")) {
     deploymentLayerRequests++;
     if (req.headers["x-timestamp"] !== "123" || req.headers["x-signature"] !== VALID_SOURCE_SIGNATURE) {
       res.writeHead(401, { "content-type": "application/json" });

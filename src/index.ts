@@ -78,7 +78,8 @@ if (config.deployProvider === "docker") {
   });
 }
 
-if (!config.backgroundWorkEnabled) console.log("[qm] background work disabled; scheduler and runtime loops will not start");
+if (!config.backgroundWorkEnabled)
+  console.log("[qm] background work disabled; scheduler and runtime loops will not start");
 
 const slackRuntime = createSlackRuntimeReconciler({
   startPaused: true,

@@ -3231,9 +3231,7 @@ export async function awsSecretsPush(config: QmConfig, configDir: string, envFil
         return;
       }
       if (aws.backgroundWorkControl && affected.includes("core")) {
-        note(
-          "core secret activation deferred: run qm up --restart core to allocate a new deployment identity",
-        );
+        note("core secret activation deferred: run qm up --restart core to allocate a new deployment identity");
         affected.splice(affected.indexOf("core"), 1);
       }
       for (const [component, host, marker, expected] of [["auth", "portal", "AUTH_EMBEDDED", "1"]] as const) {

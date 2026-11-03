@@ -106,10 +106,12 @@ test(
     );
     built.runtime.start();
     const keys = async (): Promise<string[]> =>
-      (await pool.query("SELECT DISTINCT build_sha FROM instance_heartbeats WHERE build_sha IN ($1, $2)", [
-        "sha-shared",
-        "deployment-green",
-      ])).rows.map((row) => (row as { build_sha: string }).build_sha);
+      (
+        await pool.query("SELECT DISTINCT build_sha FROM instance_heartbeats WHERE build_sha IN ($1, $2)", [
+          "sha-shared",
+          "deployment-green",
+        ])
+      ).rows.map((row) => (row as { build_sha: string }).build_sha);
     await settle(async () => (await keys()).length > 0);
     const seen = await keys();
     await built.runtime.stop();
