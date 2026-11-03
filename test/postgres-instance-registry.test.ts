@@ -56,6 +56,7 @@ test(
       startedAt: 4000,
       livenessMs: 1_000,
     });
+    await next.beat();
     assert.equal(
       await replaced.beat(),
       true,
@@ -66,6 +67,7 @@ test(
     await pool.query(
       "UPDATE instance_heartbeats SET beat_at = now() - interval '2 hours' WHERE instance_id IN ('i-old', 'i-peer')",
     );
+    await next.beat();
     assert.equal(
       await replaced.beat(),
       true,

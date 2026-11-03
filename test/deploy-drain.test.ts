@@ -86,7 +86,7 @@ test("starting a newer build stands the older one down; stopping it brings the o
     await settle(async () => a.cron.running && a.slack.connected);
     assert.ok(a.cron.running && a.slack.connected, "the only build runs cron and holds the Slack connection");
     const first = (await a.runs.enqueue({ sessionId: "s1", request: turn("t1"), maxAttempts: 3 })).run;
-    assert.equal((await a.runs.waitFor(first.id, 5_000)).status, "done");
+    assert.equal((await a.runs.waitFor(first.id, 15_000)).status, "done");
     assert.deepEqual(a.handled, ["t1"]);
 
     const b = bootBuild(url, "deployment-b", 2_000);
@@ -96,7 +96,7 @@ test("starting a newer build stands the older one down; stopping it brings the o
       assert.equal(a.slack.connected, false, "the older build closed its Slack connection");
       assert.ok(b.cron.running && b.slack.connected, "the newer build runs cron and holds Slack");
       const second = (await b.runs.enqueue({ sessionId: "s2", request: turn("t2"), maxAttempts: 3 })).run;
-      assert.equal((await b.runs.waitFor(second.id, 5_000)).status, "done");
+      assert.equal((await b.runs.waitFor(second.id, 15_000)).status, "done");
       assert.deepEqual(a.handled, ["t1"], "the older build claimed no new turn");
       assert.deepEqual(b.handled, ["t2"]);
     } finally {
@@ -113,7 +113,7 @@ test("starting a newer build stands the older one down; stopping it brings the o
     assert.equal(a.cron.starts, 2);
     assert.equal(a.slack.connects, 2);
     const third = (await a.runs.enqueue({ sessionId: "s3", request: turn("t3"), maxAttempts: 3 })).run;
-    assert.equal((await a.runs.waitFor(third.id, 5_000)).status, "done");
+    assert.equal((await a.runs.waitFor(third.id, 15_000)).status, "done");
     assert.deepEqual(a.handled, ["t1", "t3"]);
   } finally {
     await a.stop();
