@@ -168,6 +168,7 @@ function renderCronFireInput(cron: Cron, mentionRoster?: string, runtimeProblem?
     "- The stored task below: the standing instructions every fire receives. Edit it (via the cron tool) only to change what future fires are told to do.",
     "Use a cron-specific filename. Never put credentials in published state. If publication is unavailable, report that limitation and retain needed workspace state on a scoped computer. Do not move tasks that require existing workspace files to scratch without migrating and verifying their state.",
     `The retained fire log (cron tool, action="runs", id="${cron.id}") shows how prior fires went — useful when this run hits errors or surprising state.`,
+    "Report what you verified, not what you started: work launched in this fire and still running is not progress yet. If the counts haven't moved since the last fire, treat that as a blocker to report, not a reason to stay silent.",
     ...(readsNotes ? fireNoteLine(cron.lastFireNote) : []),
     ...(readsNotes
       ? [
