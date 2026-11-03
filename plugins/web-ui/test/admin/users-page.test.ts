@@ -135,3 +135,27 @@ test("user detail: offboarding previews, applies after confirming, then offers r
   ]);
   page.close();
 });
+
+test("users: offboarded people are badged and hidden until shown", async () => {
+  const page = await mountPage("/settings/users", {
+    "GET /users": {
+      users: [
+        { principalId: "stay@example.com", sessionCount: 1, turnCount: 1 },
+        { principalId: "gone@example.com", sessionCount: 1, turnCount: 1, offboarded: true, deactivated: true },
+      ],
+      grants: [],
+      externalUsers: [],
+    },
+  });
+  await page.settle();
+  assert.doesNotMatch(page.host.textContent!, /gone@example\.com/);
+  assert.match(page.host.textContent!, /1 users · 0 admins · 1 offboarded hidden/);
+  const toggle = [...page.document.querySelectorAll("button")].find((b) =>
+    /Show offboarded \(1\)/.test(b.textContent!),
+  )!;
+  toggle.click();
+  await page.settle();
+  assert.match(page.host.textContent!, /gone@example\.com\s*offboarded/);
+  assert.match(page.host.textContent!, /2 users · 0 admins/);
+  page.close();
+});

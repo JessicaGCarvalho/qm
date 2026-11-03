@@ -45,3 +45,10 @@ export function desktopClientForTurn(
     ? input.desktopClientId
     : undefined;
 }
+
+export function introducesPerson(
+  origin: TurnOrigin,
+  input: Pick<TurnRequest, "sessionSenderId" | "delegatingRunId" | "surfaceOrigin">,
+): boolean {
+  return isPersonAuthored(origin.kind) && !isSessionTurn(input) && input.surfaceOrigin?.audience !== "external";
+}

@@ -105,7 +105,9 @@ export async function offboardUser(ctx: ApiCtx): Promise<void> {
     }
     changes.push(change);
   }
-  return sendJson(res, 200, { principalId, applied: input.apply === true, changes });
+  if (input.apply !== true) return sendJson(res, 200, { principalId, applied: false, changes });
+  const principal = await deps.admin!.principals.markOffboarded(principalId, actor.id);
+  return sendJson(res, 200, { principalId, applied: true, changes, principal });
 }
 
 export async function reactivateUser(ctx: ApiCtx): Promise<void> {
@@ -115,11 +117,12 @@ export async function reactivateUser(ctx: ApiCtx): Promise<void> {
   if (!deps.identity) return sendJson(res, 404, { error: "not_found" });
   const { principalId } = await resolveAdminUser(deps, params.principalId!);
   await deps.identity.reactivate(principalId);
+  const principal = await deps.admin!.principals.markReactivated(principalId);
   audit(deps, {
     principalId: actor.id,
     action: "principal.reactivate",
     resource: principalId,
     scopeLabel: orgScope(deps),
   });
-  return sendJson(res, 200, { principalId, active: true });
+  return sendJson(res, 200, { principalId, active: true, principal });
 }

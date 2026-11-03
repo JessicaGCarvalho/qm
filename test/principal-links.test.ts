@@ -223,6 +223,7 @@ describe("person primitives fold a linked sign-in to its canonical principal", (
     assert.equal(adminStatusFromGrants(grants, EMAIL).isAdmin, true);
     const users = computeUsers({
       grants,
+      people: [OIDC, EMAIL],
       participants: [
         { sessionId: "s1", principalId: OIDC, validFrom: 10, validTo: null, validFromSeq: null, validToSeq: null },
         { sessionId: "s2", principalId: EMAIL, validFrom: 20, validTo: null, validFromSeq: null, validToSeq: null },
