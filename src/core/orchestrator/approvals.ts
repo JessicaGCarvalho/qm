@@ -22,5 +22,11 @@ export function approvalView(requestId: string, record: PendingApprovalRecord): 
     ...(record.summaryDetail ? { summaryDetail: record.summaryDetail } : {}),
     ...(record.approvalKey ? { approvalKey: record.approvalKey } : {}),
     ...(record.kind ? { kind: record.kind } : {}),
+    ...(record.call ? { executesOnApprove: true } : {}),
   };
 }
+
+export const APPROVED_CALL_RAN_NOTE =
+  "The requesting human approved the pending call, and QM has already run it exactly as approved; its result is recorded just before this message. Do not call it again. Continue the original task from that result. All other permission and screening checks remain in force.";
+
+export const APPROVAL_DECISION_SIGNAL_TEXT = "[approval decision]";

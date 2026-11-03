@@ -202,6 +202,7 @@ export type AttachFiles = (files: readonly OutboundFile[], sandboxId?: string) =
 
 export interface ToolContext extends SurfaceToolDeps {
   installSharedCanvas?: (fileId: string) => Promise<string | null>;
+  withdrawApproval?: (card: string) => Promise<{ withdrawn: string[] }>;
   admin?: AdminToolAccess;
   runtime?(request: RuntimeRequest, signal?: AbortSignal): Promise<RuntimeResult>;
   attach: AttachFiles;

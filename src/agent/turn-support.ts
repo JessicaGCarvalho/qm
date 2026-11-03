@@ -8,7 +8,13 @@ import {
 import type { ScopeId, SessionEntry } from "../types.ts";
 import { createAgentTools, type AgentToolsOptions, type ToolContextRef } from "./agent-tools.ts";
 import { goalWorkFromEntries } from "./goal.ts";
-import type { TurnLlmRequestRecord, ModelUtilities, AgentTurnInput, AgentTurnResult } from "./agent.ts";
+import type {
+  ApprovedToolCall,
+  TurnLlmRequestRecord,
+  ModelUtilities,
+  AgentTurnInput,
+  AgentTurnResult,
+} from "./agent.ts";
 import { sanitizeTitle, TITLE_GENERATION_PROMPT, titleUserPrompt } from "./agent-run.ts";
 import { errMessage, swallowAs } from "../util/errors.ts";
 import { INTERRUPTED_TOOL_RESULT } from "./context-compaction.ts";
@@ -227,6 +233,113 @@ export async function resumeInterruptedToolCall(
       timestamp: recorded.createdAt,
     },
   };
+}
+
+export interface ApprovedToolCallOutcome {
+  entries: SessionEntry[];
+  text: string;
+  isError: boolean;
+}
+
+const APPROVED_RESULT_NOTE_MAX_CHARS = 4_000;
+
+function approvedCallRoute(
+  call: ApprovedToolCall,
+  tools: readonly BridgedTool[],
+): { tool: BridgedTool; args: unknown } | null {
+  const direct = tools.find((candidate) => candidate.name === call.tool);
+  if (direct) return { tool: direct, args: call.input };
+  const connector = tools.find((candidate) => candidate.name === "mcp_call");
+  return connector ? { tool: connector, args: { tool: call.tool, args: call.input } } : null;
+}
+
+export async function runApprovedToolCall(
+  call: ApprovedToolCall,
+  ref: ToolContextRef,
+  tools: readonly BridgedTool[],
+  opts: { scopeLabel: ScopeId; cancel?: AbortSignal },
+): Promise<ApprovedToolCallOutcome> {
+  const emit = ref.emit;
+  const entries: SessionEntry[] = [];
+  let called = false;
+  let resulted = false;
+  const tag = { approvedRequestId: call.requestId };
+  const recordCall = async (): Promise<void> => {
+    if (called) return;
+    called = true;
+    const appended = await emit?.({
+      type: "tool_call",
+      payload: { tool: call.tool, callId: call.callId, ...tag },
+      scopeLabel: opts.scopeLabel,
+    });
+    if (appended) entries.push(appended as SessionEntry);
+  };
+  ref.emit = async (entry) => {
+    const payload = (entry.payload ?? {}) as Record<string, unknown>;
+    if (payload.callId !== call.callId) return emit?.(entry);
+    if (entry.type === "tool_call") {
+      if (called) return undefined;
+      called = true;
+      const appended = await emit?.({ ...entry, payload: { ...payload, ...tag } });
+      if (appended) entries.push(appended as SessionEntry);
+      return appended;
+    }
+    if (entry.type === "tool_result") {
+      await recordCall();
+      resulted = true;
+      const appended = await emit?.({ ...entry, payload: { ...payload, ...tag } });
+      if (appended) entries.push(appended as SessionEntry);
+      return appended;
+    }
+    return emit?.(entry);
+  };
+  let text = "";
+  let isError = true;
+  try {
+    const route = approvedCallRoute(call, tools);
+    if (!route) text = `[error] the approved tool ${call.tool} is not available on this turn, so it did not run`;
+    else if (opts.cancel?.aborted) text = "[error] the turn was cancelled before the approved call ran";
+    else {
+      const result = await route.tool.execute(call.callId, route.args);
+      text = (result.content ?? []).flatMap((block) => (typeof block.text === "string" ? [block.text] : [])).join("\n");
+      isError = false;
+    }
+  } catch (error) {
+    text = `[error] ${errMessage(error)}`;
+  } finally {
+    ref.emit = emit;
+  }
+  const recordedResult = entries.find((e) => e.type === "tool_result");
+  if (recordedResult) isError = (recordedResult.payload as { isError?: unknown } | null)?.isError === true || isError;
+  if (!resulted) {
+    await recordCall();
+    const appended = await emit?.({
+      type: "tool_result",
+      payload: { tool: call.tool, callId: call.callId, isError, result: text, ...tag },
+      scopeLabel: opts.scopeLabel,
+    });
+    if (appended) entries.push(appended as SessionEntry);
+  }
+  return { entries, text, isError };
+}
+
+export function approvedCallSteerNote(
+  outcome: { summary: string; approver: string },
+  ran: ApprovedToolCallOutcome,
+): string {
+  const clipped =
+    ran.text.length > APPROVED_RESULT_NOTE_MAX_CHARS
+      ? `${ran.text.slice(0, APPROVED_RESULT_NOTE_MAX_CHARS)}… [truncated; the full result is recorded in this conversation]`
+      : ran.text;
+  return (
+    `[system] ${outcome.approver} approved the pending call ${outcome.summary}, and QM ran it exactly as approved` +
+    `${ran.isError ? "; it returned an error" : ""}. Result:\n${clipped}\n` +
+    "Do not call it again; continue with this result."
+  );
+}
+
+export function deniedCallSteerNote(outcome: { summary: string; approver: string }): string {
+  return `[system] ${outcome.approver} denied the pending call ${outcome.summary}, so it did not run. Do not retry it unless they ask again.`;
 }
 
 export type OneShotRunner = (

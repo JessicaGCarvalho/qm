@@ -458,6 +458,12 @@ export interface PendingApproval {
   grantModes?: ApprovalGrantModes;
   blocksInput?: boolean;
   kind?: "approval" | "input";
+  executesOnApprove?: boolean;
+}
+
+export interface ApprovedToolCallSpec {
+  tool: string;
+  input: Record<string, unknown>;
 }
 
 export interface PendingApprovalRecord {
@@ -475,6 +481,7 @@ export interface PendingApprovalRecord {
   request?: TurnRequest;
   blocksInput?: boolean;
   kind?: "approval" | "input";
+  call?: ApprovedToolCallSpec;
 }
 
 type ApprovalScope = "once" | "session" | "always";

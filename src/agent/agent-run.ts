@@ -11,6 +11,9 @@ import {
   recordStoppedTurn,
   imageRefs,
   resumeInterruptedToolCall,
+  runApprovedToolCall,
+  approvedCallSteerNote,
+  deniedCallSteerNote,
   type BridgedTool,
   type SteerIntake,
 } from "./turn-support.ts";
@@ -1055,8 +1058,17 @@ export function createAgent(opts?: AgentOptions): Agent {
       };
       let activeSteps: StepRecorder | undefined;
       const tools = recordingTools(createTurnTools(ref, dispatched), () => activeSteps);
-      const resumed = await resumeInterruptedToolCall(dispatched, ref, tools as unknown as BridgedTool[]);
-      const turn = resumed ? { ...dispatched, history: resumed.history } : dispatched;
+      const approvedRun = dispatched.approvedToolCall
+        ? await runApprovedToolCall(dispatched.approvedToolCall, ref, tools as unknown as BridgedTool[], {
+            scopeLabel: dispatched.scopeLabel,
+            ...(dispatched.cancel ? { cancel: dispatched.cancel } : {}),
+          })
+        : null;
+      const approvedTurn = approvedRun
+        ? { ...dispatched, history: [...dispatched.history, ...approvedRun.entries] }
+        : dispatched;
+      const resumed = await resumeInterruptedToolCall(approvedTurn, ref, tools as unknown as BridgedTool[]);
+      const turn = resumed ? { ...approvedTurn, history: resumed.history } : approvedTurn;
       const { entry } = await createTurnSession(
         withRequestHeaders(baseModel, !turnModelGateway?.models[desiredModelId], wantFast),
         turn.session.id,
@@ -1271,6 +1283,25 @@ export function createAgent(opts?: AgentOptions): Agent {
                 turn.runId,
                 {
                   onSteer: async (text, ts, request, acknowledge) => {
+                    console.error("DBG onSteer", text, !!request?.approval, entry.agentSession.isStreaming);
+                    if (request?.approval) {
+                      if (!turn.resolveSteeredApproval) return false;
+                      if (!entry.agentSession.isStreaming || toolAbort.signal.aborted) return false;
+                      const decided = await turn.resolveSteeredApproval(request);
+                      if (decided.kind === "ignored") return;
+                      const note =
+                        decided.kind === "denied"
+                          ? deniedCallSteerNote(decided)
+                          : approvedCallSteerNote(
+                              decided,
+                              await runApprovedToolCall(decided.call, entry.ref, tools as unknown as BridgedTool[], {
+                                scopeLabel: turn.scopeLabel,
+                                cancel: toolAbort.signal,
+                              }),
+                            );
+                      await entry.agentSession.steer(note).catch(swallowAs("pi: steer approval outcome", undefined));
+                      return;
+                    }
                     if (ts && steeredSeen.has(ts)) return;
                     const prepared = await turn.prepareSteer?.(text, request);
                     const prompt = prepared?.text ?? text;
