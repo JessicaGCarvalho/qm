@@ -120,7 +120,6 @@ export function orgEnv(service: string, orgId: string, publicUrl: string, brand?
       ...identity,
       PUBLIC_PORT: String(PUBLIC_PORT),
       PUBLIC_WEB_URL: base,
-      WEB_UI_PUBLIC_URL: base,
       ...(brand?.botName ? { ORG_BRAND_SELF_LABEL: brand.botName, AUTH_BRAND_NAME: brand.botName } : {}),
       ...(brand?.orgName ? { ORG_BRAND_ORG_NAME: brand.orgName } : {}),
     };
@@ -203,7 +202,6 @@ const CATALOG: Record<ServiceName, ServiceDef> = {
         "PUBLIC_WEB_URL",
         "FLY_ORG",
         "PI_DETECT_MODEL",
-        "WEB_UI_PUBLIC_URL",
         "OIDC_CLIENT_ID",
         "OIDC_ALLOWED_EMAILS",
         "OIDC_ALLOWED_EMAIL_DOMAIN",

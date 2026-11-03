@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { httpDeploymentLayerTransport, type DeploymentLayerTransport } from "../deployment-layer.ts";
 
 import { randomBytes } from "node:crypto";
@@ -522,11 +523,19 @@ function noteLogTail(name: string, logs: string): void {
   note(tailString(logs, 25));
 }
 
-async function frontDoorProbe(ctx: DockerCtx): Promise<string | null> {
-  return fetch(`http://127.0.0.1:${publicHostPort(ctx)}/healthz`).then(
-    (res) => (res.ok ? null : `HTTP ${res.status}`),
-    (error: unknown) => errMessage(error),
+function frontDoorProbe(name: string): string | null {
+  const r = spawnSync(
+    "docker",
+    [
+      "exec",
+      name,
+      "node",
+      "-e",
+      `fetch("http://127.0.0.1:${PUBLIC_PORT}/healthz").then((r) => process.exit(r.ok ? 0 : (console.error("HTTP " + r.status), 1)), (e) => (console.error(e.message), process.exit(1)))`,
+    ],
+    { encoding: "utf8" },
   );
+  return r.status === 0 ? null : `${r.stderr ?? ""}${r.stdout ?? ""}`.trim() || `docker exec exited ${r.status}`;
 }
 
 async function waitReady(ctx: DockerCtx, service: ServiceName): Promise<void> {
@@ -535,7 +544,7 @@ async function waitReady(ctx: DockerCtx, service: ServiceName): Promise<void> {
   for (let i = 0; i < 90; i++) {
     const ready =
       service === "core"
-        ? (last = (await frontDoorProbe(ctx)) ?? "") === ""
+        ? (last = frontDoorProbe(name) ?? "") === ""
         : serviceDef(service).readiness.test(captureBoth("docker", ["logs", name]));
     if (ready) {
       persistRestart(name);
@@ -853,7 +862,9 @@ export async function dockerDown(config: QmConfig, opts: { purge?: boolean } = {
   if (opts.purge) {
     warn("purging the network and Postgres volume (durable data will be lost)");
     docker(["network", "rm", prefix], /not found|No such/);
-    docker(["volume", "rm", `${prefix}-pgdata`, `${prefix}-coredata`], /No such volume|not found|in use/i);
+    const volumes = new Set(capture("docker", ["volume", "ls", "-q", "--filter", `name=${prefix}-`]).split("\n"));
+    const purge = [`${prefix}-pgdata`, `${prefix}-coredata`].filter((name) => volumes.has(name));
+    if (purge.length) docker(["volume", "rm", ...purge]);
   }
   ok("down.");
 }

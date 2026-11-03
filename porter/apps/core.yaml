@@ -7,7 +7,7 @@ build:
 services:
   - name: core
     type: web
-    run: node src/index.ts
+    run: env PORT=8080 node src/index.ts
     instances: 1
     cpuCores: 1
     ramMegabytes: 2048

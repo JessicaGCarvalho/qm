@@ -239,7 +239,7 @@ test("Helm requires the public URL core's front door derives its addresses from"
 
 test("Helm wires core's front door and embedded sign-in broker from the public URL", options, () => {
   const wired = env(render({ publicUrl: "https://qm.example.com/" }));
-  for (const key of ["AGENT_API_URL", "PUBLIC_WEB_URL", "WEB_UI_PUBLIC_URL"]) {
+  for (const key of ["AGENT_API_URL", "PUBLIC_WEB_URL"]) {
     assert.equal(wired[key], "https://qm.example.com");
   }
   assert.equal(wired.AUTH_ISSUER, "https://qm.example.com/idp");

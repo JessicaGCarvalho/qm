@@ -61,7 +61,11 @@ function webReleaseStore(config: QmConfig): ReleaseStore {
   };
 }
 
-function aws(store: ReleaseStore, args: string[], input?: string): { status: number; stdout: string; stderr: string } {
+function aws(
+  store: ReleaseStore,
+  args: string[],
+  input?: string,
+): { status: number; signal: NodeJS.Signals | null; stdout: string; stderr: string } {
   const location = [
     ...(store.region ? ["--region", store.region] : []),
     ...(store.endpoint ? ["--endpoint-url", store.endpoint] : []),
@@ -71,13 +75,15 @@ function aws(store: ReleaseStore, args: string[], input?: string): { status: num
     ...(input === undefined ? { stdio: ["ignore", "pipe", "pipe"] } : { input }),
   });
   if (r.error) throw new CliError(`could not run the AWS CLI: ${r.error.message}`, { cause: r.error });
-  return { status: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+  return { status: r.status ?? 1, signal: r.signal, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
 function awsOk(store: ReleaseStore, what: string, args: string[], input?: string): string {
   const r = aws(store, args, input);
   if (r.status !== 0)
-    throw new CliError(`${what} failed (aws exited ${r.status}): ${r.stderr.trim() || r.stdout.trim()}`);
+    throw new CliError(
+      `${what} failed (aws ${r.signal ? `killed by ${r.signal}` : `exited ${r.status}`}): ${r.stderr.trim() || r.stdout.trim()}`,
+    );
   return r.stdout;
 }
 

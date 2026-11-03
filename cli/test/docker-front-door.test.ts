@@ -1,4 +1,3 @@
-import { createServer } from "node:http";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -36,6 +35,7 @@ fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(args) + "\\n");
 if (args[0] === "version") { console.log("25.0"); process.exit(0); }
 if (args[0] === "logs") { console.log(${JSON.stringify(logs)}); process.exit(0); }
 if (args[0] === "inspect") { console.log(${JSON.stringify(logs.includes("front door") ? "true" : "false")}); process.exit(0); }
+if (args[0] === "exec") { if (${JSON.stringify(logs.includes("front door"))}) process.exit(0); console.error("connect ECONNREFUSED 127.0.0.1:8000"); process.exit(1); }
 process.exit(0);
 `,
   );
@@ -89,10 +89,7 @@ async function up(logs: string, publicUrl = "http://localhost:8082"): Promise<{ 
   }
 }
 
-test("docker up publishes core's front door on loopback", { timeout: 60_000 }, async (t) => {
-  const frontDoor = createServer((req, res) => res.writeHead(req.url === "/healthz" ? 200 : 404).end());
-  await new Promise<void>((resolve) => frontDoor.listen(8082, "127.0.0.1", resolve));
-  t.after(() => frontDoor.close());
+test("docker up publishes core's front door on loopback", { timeout: 60_000 }, async () => {
   const { calls, error } = await up("[qm] listening on :8080\n[portal] public front door on http://localhost:8000");
   assert.equal(error, undefined);
   const run = calls.find((args) => args[0] === "run" && args.includes("qm-acme-core"))!;

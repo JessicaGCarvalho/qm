@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Config } from "../config.ts";
@@ -38,7 +39,7 @@ function webReleaseStore(config: Config): WebReleaseStore {
           ...(config.s3Region ? { region: config.s3Region } : {}),
           ...(config.s3Prefix ? { prefix: config.s3Prefix } : {}),
         }),
-        join(config.dataDir, "web-ui-assets"),
+        join(tmpdir(), "qm-web-ui-assets"),
       )
     : createLocalWebReleaseStore(join(config.dataDir, "web-ui"));
 }
@@ -78,7 +79,7 @@ export async function startFrontDoor(
   env.CORE_API_URL = `http://127.0.0.1:${config.port}`;
   env.CORE_ORG_ID = config.orgId;
   env.PORTAL_PUBLIC_URL = config.publicWebUrl ?? `http://localhost:${config.publicPort}`;
-  env.WEB_UI_PUBLIC_URL ||= env.PORTAL_PUBLIC_URL;
+  env.WEB_UI_PUBLIC_URL = env.PORTAL_PUBLIC_URL;
   if (config.deployAppsDomain) env.PORTAL_APPS_DOMAIN ||= config.deployAppsDomain;
   const web = (await import("../../plugins/web-ui/server/index.ts")) as WebSurface;
   const webServer = await web.startServer({

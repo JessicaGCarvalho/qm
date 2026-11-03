@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open as openFile, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
+import { buffer } from "node:stream/consumers";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import type { WebReleases } from "../../plugins/web-ui/server/index.ts";
 import { bodyToReadable, isNoSuchKey, s3Client, type S3Send } from "../persistence/s3.ts";
@@ -60,7 +60,7 @@ export function createS3WebReleaseStore(options: {
   };
 }
 
-export function createLocalWebReleaseStore(dir: string): WebReleaseStore & { has(key: string): Promise<boolean> } {
+export function createLocalWebReleaseStore(dir: string): WebReleaseStore {
   const base = resolve(dir);
   const pathOf = (key: string): string => {
     const path = resolve(base, ...key.split("/"));
@@ -69,13 +69,8 @@ export function createLocalWebReleaseStore(dir: string): WebReleaseStore & { has
   };
   return {
     async open(key) {
-      const stream = createReadStream(pathOf(key));
       try {
-        await new Promise<void>((resolve, reject) => {
-          stream.once("open", () => resolve());
-          stream.once("error", reject);
-        });
-        return stream;
+        return (await openFile(pathOf(key))).createReadStream();
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
         throw new Error(`reading ${pathOf(key)} failed: ${errMessage(error)}`, { cause: error });
@@ -88,15 +83,6 @@ export function createLocalWebReleaseStore(dir: string): WebReleaseStore & { has
       await writeFile(staging, body);
       await rename(staging, path);
     },
-    async has(key) {
-      return access(pathOf(key)).then(
-        () => true,
-        (error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return false;
-          throw new Error(`checking ${pathOf(key)} failed: ${errMessage(error)}`, { cause: error });
-        },
-      );
-    },
     describe: () => `${dir}${sep}`,
   };
 }
@@ -107,7 +93,7 @@ export function withLocalAssetCache(store: WebReleaseStore, dir: string): WebRel
     max: 512,
     fetchMethod: async (key) => {
       const remote = await store.open(key);
-      if (remote) await local.put(key, await readAll(remote));
+      if (remote) await local.put(key, await buffer(remote));
       return { found: Boolean(remote) };
     },
   });
@@ -122,16 +108,10 @@ export function withLocalAssetCache(store: WebReleaseStore, dir: string): WebRel
   };
 }
 
-async function readAll(stream: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) chunks.push(Buffer.from(chunk as Uint8Array));
-  return Buffer.concat(chunks);
-}
-
 export async function readLivePointer(store: WebReleaseStore): Promise<LivePointer | null> {
   const stream = await store.open(LIVE_KEY);
   if (!stream) return null;
-  return parseLivePointer((await readAll(stream)).toString("utf8"), `${store.describe()}${LIVE_KEY}`);
+  return parseLivePointer((await buffer(stream)).toString("utf8"), `${store.describe()}${LIVE_KEY}`);
 }
 
 async function writeLivePointer(store: WebReleaseStore, pointer: LivePointer): Promise<void> {
@@ -214,7 +194,7 @@ export function createWebReleaseReader(
     max: 512,
     fetchMethod: async (_key, _stale, { context }) => {
       const stream = await store.open(context);
-      return { body: stream ? await readAll(stream) : null };
+      return { body: stream ? await buffer(stream) : null };
     },
   });
 

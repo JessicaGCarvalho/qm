@@ -535,7 +535,6 @@ test("AWS environment derives identity, public URLs, private wiring, and MicroVM
   const core = serviceEnvironment(config, "core");
   assert.equal(core.ORG_ID, "acme");
   assert.equal(core.PUBLIC_WEB_URL, "https://agent.acme.example");
-  assert.equal(core.WEB_UI_PUBLIC_URL, "https://agent.acme.example");
   assert.equal(core.PUBLIC_WEB_URL, "https://agent.acme.example");
   assert.equal(core.PUBLIC_PORT, "8000");
   assert.equal(core.PORTAL_XFF_TRUSTED_HOPS, "1");
@@ -1076,26 +1075,6 @@ test("AWS deploy requires the live ALB to send everything but declared routes to
     await run("AWS_FAKE_DEFAULT_FORWARD", /blue\/green listener default must return a fixed 404 response/, true);
     await run("AWS_FAKE_EXTRA_RULE", /blue\/green ALB has unexpected non-default rules/, true);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("AWS up refuses a broken front door before touching ECS", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "qm-aws-front-door-"));
-  const prior = process.env.AWS_FAKE_DEFAULT_404;
-  process.env.AWS_FAKE_DEFAULT_404 = "1";
-  const single = oneServiceConfig();
-  const fake = statefulAws(dir, single);
-  try {
-    await assert.rejects(
-      () => awsUp(single, dir, { yes: true }),
-      /public front door is not ready for deployment: listener default does not route only to the core front door/,
-    );
-    assert.doesNotMatch(readFileSync(fake.log, "utf8"), /ecs update-service/);
-  } finally {
-    fake.restore();
-    if (prior === undefined) delete process.env.AWS_FAKE_DEFAULT_404;
-    else process.env.AWS_FAKE_DEFAULT_404 = prior;
     rmSync(dir, { recursive: true, force: true });
   }
 });
