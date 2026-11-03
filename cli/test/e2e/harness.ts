@@ -90,8 +90,8 @@ export function writeConfig(
   return path;
 }
 
-const STANDIN_DOCKERFILE = `FROM alpine:latest
-CMD ["sh","-c","echo 'listening on :8080'; echo 'connected as @e2ebot'; echo 'surface on http://localhost'; echo 'public front door on'; echo 'tail sentinel'; while true; do sleep 3600; done"]
+const STANDIN_DOCKERFILE = `FROM node:24-alpine
+CMD ["sh","-c","echo 'listening on :8080'; echo 'connected as @e2ebot'; echo 'surface on http://localhost'; echo 'public front door on'; echo 'tail sentinel'; exec node -e 'require(\\"node:http\\").createServer((req, res) => res.end(\\"ok\\")).listen(8000)'"]
 `;
 
 export function standInCheckout(services: readonly string[]): string {
