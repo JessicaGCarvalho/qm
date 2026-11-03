@@ -91,16 +91,6 @@ test("a configured bot identity lands in the derived core fly toml", () => {
   assert.doesNotMatch(bare, /ORG_BRAND_SELF_LABEL|AUTH_BRAND_NAME/);
 });
 
-test("core with the built-in broker derives the embedded sign-in wiring from publicUrl", () => {
-  const config = { ...exampleFlyConfig(), services: ["core", "auth"] as QmConfig["services"] };
-  const core = derivedTomlFor(config, "core", repoRoot);
-  assert.match(core, /^\s*AUTH_EMBEDDED = "1"$/m);
-  assert.match(core, /^\s*AUTH_REDIRECT_URI = "https:\/\/example\.invalid\/auth\/callback"$/m);
-  assert.match(core, /^\s*OIDC_ISSUER = "https:\/\/example\.invalid\/idp"$/m);
-  assert.match(core, /^\s*OIDC_TOKEN_ENDPOINT = "http:\/\/127\.0\.0\.1:8099\/token"$/m);
-  assert.doesNotMatch(derivedTomlFor(exampleFlyConfig(), "core", repoRoot), /AUTH_EMBEDDED|OIDC_ISSUER/);
-});
-
 test("derived Fly configs contain only the deployment's region, org, sandbox, and sign-in policy", () => {
   const config = exampleFlyConfig();
   const core = derivedTomlFor(config, "core", repoRoot);

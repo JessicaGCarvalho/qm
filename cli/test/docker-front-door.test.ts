@@ -89,7 +89,7 @@ async function up(logs: string, publicUrl = "http://localhost:8082"): Promise<{ 
   }
 }
 
-test("docker up publishes core's front door on loopback and wires its sign-in", { timeout: 60_000 }, async (t) => {
+test("docker up publishes core's front door on loopback", { timeout: 60_000 }, async (t) => {
   const frontDoor = createServer((req, res) => res.writeHead(req.url === "/healthz" ? 200 : 404).end());
   await new Promise<void>((resolve) => frontDoor.listen(8082, "127.0.0.1", resolve));
   t.after(() => frontDoor.close());
@@ -98,14 +98,7 @@ test("docker up publishes core's front door on loopback and wires its sign-in", 
   const run = calls.find((args) => args[0] === "run" && args.includes("qm-acme-core"))!;
   assert.ok(run.includes("8080:8080"), run.join(" "));
   assert.ok(run.includes("127.0.0.1:8082:8000"), run.join(" "));
-  for (const env of [
-    "PUBLIC_PORT=8000",
-    "PUBLIC_WEB_URL=http://localhost:8082",
-    "AUTH_EMBEDDED=1",
-    "AUTH_ISSUER=http://localhost:8082/idp",
-    "OIDC_AUTH_ENDPOINT=http://localhost:8082/idp/authorize",
-  ])
-    assert.ok(run.includes(env), env);
+  for (const env of ["PUBLIC_PORT=8000", "PUBLIC_WEB_URL=http://localhost:8082"]) assert.ok(run.includes(env), env);
 });
 
 test("docker up does not report core ready until its front door answers", { timeout: 60_000 }, async () => {

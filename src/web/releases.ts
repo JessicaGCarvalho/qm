@@ -103,33 +103,21 @@ export function createLocalWebReleaseStore(dir: string): WebReleaseStore & { has
 
 export function withLocalAssetCache(store: WebReleaseStore, dir: string): WebReleaseStore {
   const local = createLocalWebReleaseStore(dir);
-  const fetching = new Map<string, Promise<Buffer | null>>();
-  const absent = (key: string): string => `${key}.absent`;
-  async function fetchOnce(key: string): Promise<Buffer | null> {
-    const remote = await store.open(key);
-    if (remote) {
-      const body = await readAll(remote);
-      await local.put(key, body);
-      return body;
-    }
-    const plain = key.endsWith(".gz") ? key.slice(0, -".gz".length) : undefined;
-    if (plain && (await local.has(plain))) await local.put(absent(key), Buffer.alloc(0));
-    return null;
-  }
+  const fetched = new LRUCache<string, { found: boolean }>({
+    max: 512,
+    fetchMethod: async (key) => {
+      const remote = await store.open(key);
+      if (remote) await local.put(key, await readAll(remote));
+      return { found: Boolean(remote) };
+    },
+  });
   return {
     ...store,
     async open(key) {
       if (!key.startsWith("assets/")) return store.open(key);
       const cached = await local.open(key);
       if (cached) return cached;
-      if (await local.has(absent(key))) return null;
-      let pending = fetching.get(key);
-      if (!pending) {
-        pending = fetchOnce(key).finally(() => fetching.delete(key));
-        fetching.set(key, pending);
-      }
-      const body = await pending;
-      return body ? Readable.from(body) : null;
+      return (await fetched.fetch(key))?.found ? local.open(key) : null;
     },
   };
 }
@@ -151,12 +139,11 @@ async function writeLivePointer(store: WebReleaseStore, pointer: LivePointer): P
 }
 
 async function uploadAll(store: WebReleaseStore, dir: string, keyed: Array<[string, string]>): Promise<void> {
-  const queue = [...keyed];
-  const worker = async (): Promise<void> => {
-    for (let next = queue.shift(); next; next = queue.shift())
-      await store.put(next[0], await readFile(join(dir, next[1])));
-  };
-  await Promise.all(Array.from({ length: Math.min(UPLOAD_WORKERS, queue.length) }, worker));
+  await Readable.from(keyed)
+    .map(async ([key, file]: [string, string]) => store.put(key, await readFile(join(dir, file))), {
+      concurrency: UPLOAD_WORKERS,
+    })
+    .toArray();
 }
 
 export async function deployBundledRelease(

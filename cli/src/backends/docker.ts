@@ -522,19 +522,20 @@ function noteLogTail(name: string, logs: string): void {
   note(tailString(logs, 25));
 }
 
-async function frontDoorAnswers(ctx: DockerCtx): Promise<boolean> {
+async function frontDoorProbe(ctx: DockerCtx): Promise<string | null> {
   return fetch(`http://127.0.0.1:${publicHostPort(ctx)}/healthz`).then(
-    (res) => res.ok,
-    () => false,
+    (res) => (res.ok ? null : `HTTP ${res.status}`),
+    (error: unknown) => errMessage(error),
   );
 }
 
 async function waitReady(ctx: DockerCtx, service: ServiceName): Promise<void> {
   const name = cname(ctx, service);
+  let last = "no log line matched yet";
   for (let i = 0; i < 90; i++) {
     const ready =
       service === "core"
-        ? await frontDoorAnswers(ctx)
+        ? (last = (await frontDoorProbe(ctx)) ?? "") === ""
         : serviceDef(service).readiness.test(captureBoth("docker", ["logs", name]));
     if (ready) {
       persistRestart(name);
@@ -547,7 +548,8 @@ async function waitReady(ctx: DockerCtx, service: ServiceName): Promise<void> {
     }
     await sleep(1000);
   }
-  throw new CliError(`${service} did not become ready in 90s`);
+  noteLogTail(name, captureBoth("docker", ["logs", name]));
+  throw new CliError(`${service} did not become ready in 90s (last check: ${last})`);
 }
 
 async function waitPluginUp(name: string): Promise<void> {

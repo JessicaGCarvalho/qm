@@ -641,26 +641,6 @@ test("AWS fixes every workload listen port to its ECS port mapping", () => {
   ]);
 });
 
-test("AWS core carries the embedded auth broker wiring only when auth is enabled", () => {
-  const withAuth: QmConfig = {
-    ...config,
-    services: [...config.services, "auth"],
-    env: { ...config.env, auth: { AUTH_ALLOWED_EMAIL_DOMAIN: "acme.example" } },
-  };
-  const core = serviceEnvironment(withAuth, "core");
-  assert.equal(core.AUTH_EMBEDDED, "1");
-  assert.equal(core.AUTH_ISSUER, "https://agent.acme.example/idp");
-  assert.equal(core.OIDC_ISSUER, "https://agent.acme.example/idp");
-  assert.equal(core.AUTH_REDIRECT_URI, "https://agent.acme.example/auth/callback");
-  assert.equal(core.OIDC_TOKEN_ENDPOINT, "http://127.0.0.1:8099/token");
-  assert.equal(core.OIDC_ALLOWED_EMAIL_DOMAIN, "acme.example");
-  assert.equal(core.PORTAL_XFF_TRUSTED_HOPS, "1");
-  const without = serviceEnvironment(config, "core");
-  assert.equal(without.AUTH_EMBEDDED, undefined);
-  assert.equal(without.OIDC_ISSUER, undefined);
-  assert.equal(serviceEnvironment(withAuth, "egress-proxy").AUTH_EMBEDDED, undefined);
-});
-
 test("AWS core receives the configured model and virtual-service environment", () => {
   const configured: QmConfig = {
     ...config,

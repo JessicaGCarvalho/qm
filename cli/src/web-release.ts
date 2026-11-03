@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 
 export interface LivePointer {
   release: string;
@@ -34,16 +34,11 @@ export function parseLivePointer(text: string, where: string): LivePointer {
   return { release, deployed };
 }
 
-function bundleFiles(dir: string, rel = ""): string[] {
-  return readdirSync(join(dir, rel), { withFileTypes: true }).flatMap((entry) => {
-    const path = rel ? `${rel}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) return bundleFiles(dir, path);
-    return entry.isFile() ? [path] : [];
-  });
-}
-
 export function readWebBundleLayout(dir: string): WebBundleLayout {
-  const files = bundleFiles(dir).sort();
+  const files = readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/"))
+    .sort();
   if (!files.includes("index.html")) throw new Error(`${join(dir, "index.html")} is missing; build the web UI first`);
   const id = createHash("sha256");
   for (const file of files) {

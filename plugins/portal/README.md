@@ -288,8 +288,9 @@ distinct from `CORE_SIGNING_SECRET`.
 
 ## Run / test
 
+Core starts the portal in-process on `PUBLIC_PORT`.
+
 ```bash
-npm start
 npm run typecheck
 npm test
 ```
