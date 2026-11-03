@@ -2054,7 +2054,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
           record: PendingApprovalRecord,
           decided: { approved: boolean; scope?: "once" | "session" | "always" },
           author: string,
-        ): Promise<void> => {
+        ): Promise<boolean> => {
+          if (!(await pending.take(requestId))) return false;
           const decisionEntry = await withManagedRosterVersion(() =>
             deps.sessions.append(lease, {
               type: "approval_resolved",
@@ -2064,7 +2065,20 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             }),
           );
           await mirrorRunActivity(decisionEntry);
-          await pending.delete(requestId);
+          return true;
+        };
+        const alreadyDecided = (requestId: string): TurnResult => {
+          audit({
+            action: "command_approval.decide",
+            resource: requestId,
+            status: "refused",
+            detail: JSON.stringify({ approvalOutcome: "already_decided" }),
+          });
+          return {
+            status: "refused",
+            sessionId: session.id,
+            reason: "that approval request expired — ask again if you still want it to run",
+          };
         };
         if (input.approval) {
           const p = await pending.get(input.approval.requestId);
@@ -2101,7 +2115,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
             const messagePrefix = "security-screen-release:session_message_";
             if (p.approvalKey?.startsWith(messagePrefix))
               await deps.sessionSyscalls?.rejectMessage?.(session.id, p.approvalKey.slice(messagePrefix.length));
-            await recordApprovalDecision(input.approval.requestId, p, { approved: false }, actor.id);
+            if (!(await recordApprovalDecision(input.approval.requestId, p, { approved: false }, actor.id)))
+              return alreadyDecided(input.approval.requestId);
             if (p.kind !== "input" && !p.screenedOutput)
               await withManagedRosterVersion(() =>
                 deps.sessions.append(lease, {
@@ -2191,7 +2206,8 @@ export function createOrchestrator(deps: OrchestratorDeps): Orchestrator {
                 );
               await deps.agent.resetSession?.(session.id);
             }
-            await recordApprovalDecision(input.approval.requestId, p, { approved: true, scope }, actor.id);
+            if (!(await recordApprovalDecision(input.approval.requestId, p, { approved: true, scope }, actor.id)))
+              return alreadyDecided(input.approval.requestId);
             const useKey = p.approvalKey ?? p.command;
             if (p.screenedOutput && quarantineRelease) {
               releasedToolOutput = p.screenedOutput;

@@ -66,7 +66,7 @@ export async function resolveLiveApproval(
     clickerId: string;
     runActorId: string;
     audit: ApprovalAudit;
-    recordDecision: (requestId: string, record: PendingApprovalRecord, approved: boolean) => Promise<void>;
+    recordDecision: (requestId: string, record: PendingApprovalRecord, approved: boolean) => Promise<boolean>;
     grantOnce: (approvalKey: string) => void;
   },
 ): Promise<SteeredApproval> {
@@ -87,7 +87,7 @@ export async function resolveLiveApproval(
     });
     return { kind: "ignored" };
   }
-  await ctx.recordDecision(decision.requestId, record, decision.approved);
+  if (!(await ctx.recordDecision(decision.requestId, record, decision.approved))) return { kind: "ignored" };
   const approver = request.actor.displayName?.trim() || "The requesting human";
   const summary = record.summary ?? record.command;
   if (!decision.approved) {
