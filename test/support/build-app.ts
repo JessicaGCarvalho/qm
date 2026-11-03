@@ -39,27 +39,23 @@ export function buildApp(
   overrides: Parameters<typeof buildProductionApp>[1] = {},
 ): BuiltApp & { modelCalls: ModelCall[] } {
   const modelCalls: ModelCall[] = [];
+  let testStartedWorkers = false;
+  let waiting = 0;
   const app = stopAtEnd(
     buildProductionApp(
       { anthropicApiKey: "test-anthropic-key", ...config },
-      { agent: recordingModelCalls(createMockAgent(), modelCalls), ...overrides },
+      {
+        agent: recordingModelCalls(createMockAgent(), modelCalls),
+        canClaimRuns: () => testStartedWorkers || waiting > 0,
+        ...overrides,
+      },
     ),
   );
   const { runtime } = app;
-  const { start, startBackground } = runtime;
-  let testStartedWorkers = false;
-  let waiting = 0;
-  runtime.setBackgroundAdmission(
-    () => !config.backgroundDeploymentId && (testStartedWorkers || waiting > 0),
-    () => false,
-  );
-  runtime.start = () => {
+  const { start } = runtime;
+  runtime.start = (services) => {
     testStartedWorkers = true;
-    start();
-  };
-  runtime.startBackground = () => {
-    testStartedWorkers = true;
-    startBackground();
+    start(services);
   };
   const turn = app.app.turn.bind(app.app);
   app.app.turn = async (req, replay) => {

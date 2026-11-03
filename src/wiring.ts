@@ -526,6 +526,7 @@ export function buildApp(
     modelCredentialFetch?: typeof fetch;
     modelVerificationProbe?: typeof probeModel;
     agent?: Agent;
+    canClaimRuns?: () => boolean;
   } = {},
 ): BuiltApp {
   const admittedWork = createAdmittedWork();
@@ -2652,7 +2653,7 @@ export function buildApp(
         })
       : createNoopInstanceRegistry();
   const drain: DrainController = createDrainController({ registry: instanceRegistry });
-  const canClaimRuns = () => drain.canClaim();
+  const canClaimRuns = () => drain.canClaim() && (overrides.canClaimRuns?.() ?? true);
   const worker = createWorker({
     admittedWork,
     runs,
