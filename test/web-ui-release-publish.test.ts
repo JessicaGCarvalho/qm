@@ -20,7 +20,8 @@ const args = [];
 const opts = {};
 const raw = process.argv.slice(2);
 for (let i = 0; i < raw.length; i++) {
-  if (raw[i] === "--size-only" || raw[i] === "--only-show-errors") continue;
+  if (raw[i] === "--size-only" || raw[i] === "--only-show-errors" || raw[i] === "--recursive") { opts[raw[i]] = true; continue; }
+  if (raw[i] === "--exclude") { (opts.exclude ??= []).push(raw[++i]); continue; }
   if (raw[i].startsWith("--")) { opts[raw[i]] = raw[++i]; continue; }
   args.push(raw[i]);
 }
@@ -29,6 +30,7 @@ const [service, verb, a, b] = args;
 if (service === "s3api" && verb === "list-objects-v2") { process.stdout.write(fs.existsSync(path.join(root, opts["--prefix"])) ? "1\\n" : "0\\n"); process.exit(0); }
 if (service !== "s3") { process.stderr.write("unsupported " + args.join(" ")); process.exit(2); }
 if (verb === "cp" && b === "-") { process.stdout.write(fs.readFileSync(local(a))); process.exit(0); }
+if (verb === "cp" && opts["--recursive"]) { const skip = (rel) => (opts.exclude ?? []).some((x) => x.endsWith("/*") ? rel.startsWith(x.slice(0, -1)) : rel === x); for (const rel of fs.readdirSync(a, { recursive: true })) { const from = path.join(a, rel); if (!fs.statSync(from).isFile() || skip(rel)) continue; const to = path.join(local(b), rel); fs.mkdirSync(path.dirname(to), { recursive: true }); fs.copyFileSync(from, to); } process.exit(0); }
 if (verb === "cp") { const p = local(b); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, a === "-" ? fs.readFileSync(0) : fs.readFileSync(a)); process.exit(0); }
 if (verb === "sync") { const to = local(b); fs.mkdirSync(to, { recursive: true }); for (const f of fs.readdirSync(a)) fs.copyFileSync(path.join(a, f), path.join(to, f)); process.exit(0); }
 process.stderr.write("unsupported " + args.join(" ")); process.exit(2);

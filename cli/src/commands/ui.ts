@@ -119,14 +119,27 @@ function upload(store: ReleaseStore, dir: string, bundle: WebBundleLayout): void
       "--size-only",
       "--only-show-errors",
     ]);
-  for (const file of bundle.documents)
-    awsOk(store, `uploading ${file}`, [
+  const entry = bundle.documents.at(-1)!;
+  if (bundle.documents.length > 1)
+    awsOk(store, "uploading web UI documents", [
       "s3",
       "cp",
-      join(dir, file),
-      s3Uri(store, releaseKey(bundle.id, file)),
+      dir,
+      s3Uri(store, releaseKey(bundle.id, "")),
+      "--recursive",
+      "--exclude",
+      "assets/*",
+      "--exclude",
+      entry,
       "--only-show-errors",
     ]);
+  awsOk(store, `uploading ${entry}`, [
+    "s3",
+    "cp",
+    join(dir, entry),
+    s3Uri(store, releaseKey(bundle.id, entry)),
+    "--only-show-errors",
+  ]);
 }
 
 export function runUiPublish(config: QmConfig, o: UiPublishOptions): void {
