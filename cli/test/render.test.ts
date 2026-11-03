@@ -45,6 +45,10 @@ function deployment(t: TestContext, auth = false) {
   ) as Record<string, any>;
   raw.render.workspaceId = "tea-acme";
   raw.services = auth ? ["core", "auth"] : ["core"];
+  raw.sandbox = {
+    ...raw.sandbox,
+    baseImage: `ghcr.io/yc-software/qm/sandbox-base:${"c".repeat(40)}@sha256:${"d".repeat(64)}`,
+  };
   raw.env = {
     ...(auth ? { auth: { ...raw.env.auth, AUTH_ALLOWED_EMAIL_DOMAIN: "example.com" } } : {}),
     core: { ...raw.env.core },
