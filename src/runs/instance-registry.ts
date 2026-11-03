@@ -48,13 +48,13 @@ export function createPostgresInstanceRegistry(
       );
       await pg.query(`DELETE FROM instance_heartbeats WHERE beat_at < now() - interval '1 hour'`, []);
       const { rowCount } = await pg.query(
-        `WITH live AS (
-           SELECT build_sha, min(started_at) AS started_at FROM instance_heartbeats
-            WHERE beat_at > now() - ($2 || ' milliseconds')::interval
-            GROUP BY build_sha
+        `WITH deployments AS (
+           SELECT build_sha, min(started_at) AS started_at, max(beat_at) AS beat_at
+             FROM instance_heartbeats GROUP BY build_sha
          )
-         SELECT 1 FROM live other JOIN live own ON own.build_sha = $1
+         SELECT 1 FROM deployments other JOIN deployments own ON own.build_sha = $1
           WHERE other.build_sha <> $1 AND other.started_at > own.started_at
+            AND other.beat_at > now() - ($2 || ' milliseconds')::interval
           LIMIT 1`,
         [opts.deploymentKey, String(livenessMs)],
       );
@@ -62,7 +62,10 @@ export function createPostgresInstanceRegistry(
     },
     async retire(): Promise<void> {
       if (!readyP) return;
-      await pg.query(`DELETE FROM instance_heartbeats WHERE instance_id = $1`, [opts.instanceId]);
+      await pg.query(
+        `UPDATE instance_heartbeats SET beat_at = now() - ($2 || ' milliseconds')::interval WHERE instance_id = $1`,
+        [opts.instanceId, String(livenessMs)],
+      );
     },
   };
 }

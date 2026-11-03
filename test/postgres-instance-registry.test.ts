@@ -48,13 +48,19 @@ test(
     assert.equal(await old.beat(), true, "newer build live: superseded");
     assert.equal(await next.beat(), false, "the newest build itself is not superseded");
 
+    await old.retire();
+    await peer.retire();
     const replaced = createPostgresInstanceRegistry(pool, {
       instanceId: "i-old-replacement",
       deploymentKey: "sha-a",
       startedAt: 4000,
       livenessMs: 1_000,
     });
-    assert.equal(await replaced.beat(), true, "a replaced task of the older deployment stays behind the newer one");
+    assert.equal(
+      await replaced.beat(),
+      true,
+      "a task replacing every stopped task of the older deployment stays behind the newer one",
+    );
     assert.equal(await next.beat(), false, "the replacement does not take over from the newer deployment");
 
     await next.retire();
